@@ -7,7 +7,7 @@ const world = { timestamp: { story_date: '2024-12-01', story_time: '10:00' }, sc
 const chat = [];
 const post = (name, user = false) => { chat.push({ name, is_user: user, is_system: false, mes: '…', horae_meta: { timestamp: { ...world.timestamp } } }); return chat.length - 1; };
 const handlers = {};
-const st = { ext: { brain: { auto: false } }, md: {}, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [] };
+const st = { ext: { brain: { auto: false } }, md: {}, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [], faces: [] };
 
 const api = {
     ctx: () => ({ name1: 'Хеди Барлоу', extensionSettings: st.ext, chatMetadata: st.md, saveSettingsDebounced() {}, saveMetadataDebounced() {}, eventSource: { on() {} }, eventTypes: { CHAT_CHANGED: 'chat' } }),
@@ -49,6 +49,7 @@ const api = {
         wants: (who) => st.wants[first(who)] || [],
         fx: (who) => st.fx[first(who)] || [],
         steps: () => ({ n: st.steps, themes: [] }),
+        face: (i, who, k) => { st.faces.push([i, first(who), k]); return true; },
     },
     lore: { about: async () => 'Лор о нём.', card: () => 'Карточка.', core: () => '• говорит коротко', key: (w) => String(w).trim(), coreAdd: (who, line) => { st.core.push([who, line]); return true; } },
     shelf: { tracker: (t) => { st.shelf.tracker = t; return true; }, mind: (f) => { st.shelf.mind = f; }, recs: (f) => { st.shelf.recs = f; }, open() {} },
@@ -443,4 +444,62 @@ test('0.2: тревога за неё выходит опекой, пока он
     st.stones = { who: 'Хеди Барлоу', mode: 'attack' };
     assert.match(mod.prompt('normal'), /тревога за близкого \(Хеди\) выходит опекой/);
     st.stones = null;
+});
+
+
+// ───── 0.3: мозг рулит соседями ─────
+
+test('0.3: «Языки» — срывается на свой язык по порогу чувства', async () => {
+    await fresh(1800);
+    assert.equal(brain.tongue(B), '');
+    next([{ who: 'Баки', wrong: 3, why: 'ей угрожали при нём' }]);
+    next([{ who: 'Баки', wrong: 2, why: 'и продолжили' }]);
+    assert.equal(brain.tongue(B), 'злость');
+    await fresh(1900);
+    const i = post(B);
+    st.trig[i] = [{ who: B, t: 'Русские кодовые слова', coped: true, lvl: 2 }];
+    mod.afterPost(i, { psy: [] }, chat[i]);
+    assert.equal(brain.tongue(B), 'триггер');
+});
+
+test('0.3: лицо на аватарке — мозг подсказывает, если человек не держал маску', async () => {
+    await fresh(2000);
+    st.faces.length = 0;
+    let i = next([{ who: 'Баки', loss: 3, why: 'она ушла, хлопнув дверью' }]);
+    assert.deepEqual(st.faces[st.faces.length - 1], [i, 'баки', 'sad']);
+    const n = st.faces.length;
+    i = next([{ who: 'Баки', loss: 2, held: 2, why: 'сделал вид, что всё в порядке' }]);
+    assert.equal(st.faces.length, n, 'держал лицо — лицо остаётся тем, что видно снаружи');
+});
+
+test('0.3: что назрело — для твиста вслепую и искры драмы', async () => {
+    await fresh(2100);
+    assert.equal(brain.ripe(), '');
+    live().strain = 70;
+    assert.match(brain.ripe(), /Баки: нервы на пределе/);
+    live().mask = 85;
+    assert.match(brain.ripe(), /Баки носит в себе несказанное/);
+    live().mask = 0; live().strain = 10;
+    world.scene.characters_present = ['Наташа Романофф', 'Хеди Барлоу'];
+    live().strain = 90;
+    assert.equal(brain.ripe(), '', 'кого нет в сцене — не в счёт');
+    world.scene.characters_present = ['Баки Барнс', 'Хеди Барлоу'];
+});
+
+test('0.3: стук от тоски — давно не виделись', async () => {
+    await fresh(2200);
+    assert.deepEqual(brain.miss(), [], 'он рядом — не скучает');
+    world.scene.characters_present = ['Наташа Романофф', 'Хеди Барлоу'];
+    hour(2210);
+    assert.deepEqual(brain.miss().filter(x => x.who === B), [], 'десять часов — рано');
+    hour(2240);
+    const m = brain.miss();
+    assert.equal(m.length, 1);
+    assert.equal(m[0].who, B);
+    assert.equal(m[0].how, 'text');
+    assert.match(m[0].id, /^brn:Баки Барнс:/);
+    hour(2300);
+    assert.equal(brain.miss()[0].how, 'call', 'три дня — уже звонит');
+    world.scene.characters_present = ['Баки Барнс', 'Хеди Барлоу'];
+    assert.deepEqual(brain.miss().filter(x => x.who === B), []);
 });

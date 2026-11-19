@@ -8,7 +8,7 @@
 import * as P from './core/psyche.js';
 import { EMO_NAME, EMO_TITLE, EMO_ICON, WILL_TEXT, WILL_NAME, SINGLES, SINGLE_TITLE, BELIEF_NAME, cassOf, cassText, cassLines, cleanCass, beliefText } from './core/cassettes.js';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const ID = 'brain';
 const TITLE = '🧠 Мозг';
 const NARR = /рассказчик|narrator|мастер|game ?master|(^|[^a-z])gm([^a-z]|$)|мнемозина/i;
@@ -24,6 +24,8 @@ const MAIN_AX = { fear: 'ctl', anger: 'val', shame: 'wor', low: 'val' };
 const NUDGE = [['warm', 'обогреть'], ['fun', 'рассмешить'], ['calm', 'успокоить'], ['win', 'дать победить'], ['open', 'дать выговориться'], ['threat', 'напугать'], ['blow', 'задеть'], ['bound', 'прижать'], ['wrong', 'разозлить'], ['loss', 'оставить в одиночестве']];
 const LEAK_NAME = ['держит при себе', 'проступает', 'почти не держит'];
 const INIT_NAME = { care: 'забота', court: 'ухаживание', flirt: 'флирт', touch: 'касание', spicy: 'откровенность', gift: 'подарок', own: 'своё дело', talk: 'разговор', plot: 'затея' };
+// какое лицо из набора Life соответствует ведущей эмоции
+const FACE = { fear: 'tense', anger: 'angry', shame: 'sad', low: 'sad', tender: 'tender', playful: 'laugh' };
 // чем подменяет шаг, на который не хватило
 const SAFE = { court: 'заботой по мелочи, взглядом, шуткой', flirt: 'заботой по мелочи, взглядом, шуткой', spicy: 'намёком или шуткой', touch: 'жестом рядом, не касаясь', gift: 'оставит молча, без слов', talk: 'начнёт издалека или отложит' };
 // что сейчас действует на человека (текст из «Способностей» Life)
@@ -416,7 +418,14 @@ function afterPost(i, j, msg) {
         const mineOps = ops.filter(o => A.sameName(o.who, who));
         if (mineOps.length) { for (const op of mineOps) applyOp(s, t, op); last = P.dominant(P.eff(s, sig.off), s.base); }
         P.sample(s, P.eff(s, sig.off), n.day);
+        // когда они последний раз были в одной сцене с героиней игрока (для «стука от тоски»)
+        if (there && here.length && inScene(user(), here)) s.seen = { ts: n.ts, mes: i };
         drive(who, last, s, s.why && i - s.why.mes <= 6 ? s.why.t : '', i);
+        // лицо на аватарке: мозг подсказывает, только если Летописец лица не увидел и человек не держал маску
+        if (A.senses?.face && !said.held) {
+            const face = s.hang && !last.id ? 'sad' : last.step >= 2 ? FACE[last.id] : '';
+            if (face) safe(() => A.senses.face(i, who, face));
+        }
     }
     for (let k = spends.length - 1; k >= 0; k--) if (spends[k].i <= i) spends.splice(k, 1);
     saveM();
@@ -489,6 +498,61 @@ function prompt(type) {
     if (!on() || type === 'quiet' || type === 'impersonate') return '';
     const here = present();
     return list().filter(n => inScene(n, here)).map(n => safe(() => note(n), '')).filter(Boolean).join('\n');
+}
+
+// ───────────── что мозг отдаёт соседям Life ─────────────
+
+/** Дошло ли до той ступени, где он срывается на свой язык: слово для «Языков» или ''. */
+function tongueOf(who) {
+    const v = view(who);
+    if (v.s.brk) return 'срыв';
+    if (v.s.lastTrig != null && A.chatArr().length - 1 - v.s.lastTrig <= 2) return 'триггер';
+    const d = v.dom;
+    if (d.id === 'anger' && d.step >= 2) return 'злость';
+    if (d.id === 'fear' && d.step >= 3) return 'страх';
+    if (d.id === 'tender' && d.step >= 2) return 'нежность';
+    if (d.id === 'low' && d.step >= 2) return 'тоска, наедине с собой';
+    return '';
+}
+
+/** Что на самом деле назрело у тех, кто в сцене, — одной строкой для твиста вслепую и искры драмы ('' — ничего). */
+function ripeOf() {
+    const here = present();
+    const found = [];
+    for (const who of list().filter(n => inScene(n, here))) {
+        const v = view(who);
+        const { s, t, sig } = v;
+        const W = short(who);
+        if (s.brk) found.push([9, `${W} на грани срыва`]);
+        if (P.leakOf(s, sig.loose)) found.push([8, `${W} носит в себе несказанное, и оно просится наружу`]);
+        if (sig.date) found.push([7, `сегодня ${sig.date.t} — ${W} помнит этот день`]);
+        const weak = t.beliefs.map(b => [b, P.beliefHp(s, b.id)]).filter(([, hp]) => hp > 0 && hp <= 40).sort((a, b) => a[1] - b[1])[0];
+        if (weak) found.push([6, `убеждение «${weak[0].t}», с которым живёт ${W}, вот-вот рухнет`]);
+        if (s.strain >= 60) found.push([5, `${W}: нервы на пределе${sig.list.length ? ` (${sig.list.slice(0, 2).map(x => x.text).join(', ')})` : ''}`]);
+        if (sig.worry) found.push([4, `${W} изводится тревогой за близкого`]);
+        if (sig.list.some(x => x.id === 'unsaid')) found.push([3, `${W} давно молчит о собственном желании`]);
+        if (sig.night) found.push([2, `у ${W} была плохая ночь`]);
+    }
+    found.sort((a, b) => b[0] - a[0]);
+    return found[0]?.[1] || '';
+}
+
+/** Кто соскучился: близкий, которого давно не было в одной сцене с героиней игрока. Не больше одного. */
+function missOf() {
+    const here = present();
+    const U = user();
+    const now = nowStamp();
+    const out = [];
+    for (const who of list()) {
+        if (inScene(who, here) && here.length) continue;
+        const s = stateOf(who);
+        if (!s.seen || s.brk || s.will < 20 || !close(who, U)) continue;
+        const h = hoursBetween(s.seen, now);
+        const far = s.seen.ts != null && now.ts != null ? h >= 30 : aiSince(s.seen.mes, now.mes) >= 80;
+        if (!far) continue;
+        out.push({ h, id: `brn:${A.canonName(who)}:${now.day || Math.floor(now.mes / 80)}`, who: A.canonName(who), how: h >= 72 ? 'call' : 'text', why: 'давно не виделись: скучает и хочет знать, как дела' });
+    }
+    return out.sort((a, b) => b.h - a.h).slice(0, 1).map(({ h, ...x }) => x);
 }
 
 // ───────────── темперамент из карточки и лорбука ─────────────
@@ -975,6 +1039,12 @@ globalThis.LifeBrain = {
     }, null),
     /** Шаг сделан в посте i — воля спишется, когда мозг дочитает этот пост. */
     spend: (who, kind, i) => { safe(() => { if (on() && mine(who)) spends.push({ who: A.canonName(who), kind: String(kind || ''), i: Number(i) }); }); },
+    /** «Языки»: дошло ли до ступени, где срывается на свой язык, — слово или ''. */
+    tongue: (who) => safe(() => (on() && mine(who) ? tongueOf(who) : ''), ''),
+    /** Твисты и драма: что на самом деле назрело в сцене — строка или ''. */
+    ripe: () => safe(() => (on() ? ripeOf() : ''), ''),
+    /** «Стук в сцену»: кто соскучился — [{ id, who, how, why }]. */
+    miss: () => safe(() => (on() ? missOf() : []), []),
     /** Была ли у него сегодня плохая ночь. */
     night: (who) => safe(() => { if (!on() || !mine(who)) return false; const s = stateOf(who); return !!s.night?.bad && s.night.day === nowStamp().day; }, false),
     open: (who) => safe(() => openBrain(who)),
