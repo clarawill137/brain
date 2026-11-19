@@ -9,7 +9,7 @@
 export const AXES = ['val', 'aro', 'ctl', 'wor'];
 
 /** Что может случиться с человеком. Летописец ставит силу 0–3 каждому виду. */
-export const KINDS = ['warm', 'fun', 'win', 'calm', 'threat', 'blow', 'bound', 'wrong', 'loss', 'held'];
+export const KINDS = ['warm', 'fun', 'win', 'calm', 'threat', 'blow', 'bound', 'wrong', 'loss', 'held', 'open'];
 export const NEGATIVE = ['threat', 'blow', 'bound', 'wrong', 'loss'];
 
 /** Сила 0–3 → единицы сдвига. */
@@ -27,11 +27,16 @@ const HIT = {
     wrong: { val: -1.0, aro: 0.8, ctl: 0.1, wor: 0, strain: 0.65, will: 0 },
     loss: { val: -1.0, aro: -0.5, ctl: -0.2, wor: -0.2, strain: 0.5, will: 0 },
     held: { val: 0, aro: 0, ctl: 0, wor: 0, strain: 0.3, will: -0.5 },
+    open: { val: 0.35, aro: -0.2, ctl: 0.2, wor: 0.35, strain: -0.5, will: 0.15 },   // выговорился, показал настоящее — отпускает
 };
+// маска — сколько он сейчас носит в себе несказанного: «сдержался» копит, «открылся» снимает
+const MASK_UP = [0, 8, 16, 26];
+const MASK_DOWN = [0, 14, 28, 45];
 
 export const FAST_HL = 0.75;      // часов истории: вспышка гаснет наполовину
 export const MOOD_HL = 10;        // настроение
 export const STRAIN_HL = 18;      // напряжение
+export const MASK_HL = 36;        // несказанное выветривается медленно
 export const MOOD_SHARE = 0.35;   // какая доля события оседает в настроении
 export const MUL_CAP = 1.35;      // потолок «характер × больное место»: одно событие не должно сносить человека
 export const RAW_CAP = 1.5;       // потолок «сырых нервов»
@@ -57,7 +62,10 @@ export function defaultTemper() {
         recover: 1,    // как быстро отходит (0.5 — долго носит, 2 — отходчивый)
         grit: 1,       // запас воли и как быстро она возвращается
         sens: { warm: 1, threat: 1, blow: 1, bound: 1, wrong: 1, loss: 1 },   // больные места
-        cass: {},      // свои кассеты: { fear: ['…', …], …, brk: '…', hang: '…' }
+        cass: {},      // свои кассеты: { fear: ['…', …], …, brk: '…', hang: '…', care: '…', night: '…', leak: '…' }
+        fix: [],       // что его возвращает в себя: ['её голос', 'счёт вслух', …]
+        beliefs: [],   // с чем о себе живёт: [{ id, t: 'я испорченный', truth: 'что станет правдой, если сломается' }]
+        dates: [],     // дни, которые помнит телом: [{ md: '12-16', t: 'что это', kind: 'loss' | 'blow' }]
         note: '',
         src: 'auto',
     };
@@ -77,9 +85,27 @@ export function normTemper(t) {
     out.sens = {};
     for (const k of Object.keys(d.sens)) out.sens[k] = r1(clamp(x.sens?.[k] ?? 1, 0.3, 2.5));
     out.cass = x.cass && typeof x.cass === 'object' ? x.cass : {};
+    out.fix = (Array.isArray(x.fix) ? x.fix : []).map(v => String(v || '').trim().slice(0, 80)).filter(Boolean).slice(0, 6);
+    out.beliefs = (Array.isArray(x.beliefs) ? x.beliefs : []).map(b => {
+        const t = String(b?.t || '').trim().slice(0, 90);
+        return t ? { id: String(b.id || beliefId(t)), t, truth: String(b.truth || '').trim().slice(0, 140) } : null;
+    }).filter(Boolean).slice(0, 4);
+    out.dates = (Array.isArray(x.dates) ? x.dates : []).map(d => {
+        const md = String(d?.md || '').match(/^(\d{1,2})-(\d{1,2})$/);
+        const t = String(d?.t || '').trim().slice(0, 80);
+        if (!md || !t || +md[1] < 1 || +md[1] > 12 || +md[2] < 1 || +md[2] > 31) return null;
+        return { md: `${String(+md[1]).padStart(2, '0')}-${String(+md[2]).padStart(2, '0')}`, t, kind: d.kind === 'blow' ? 'blow' : 'loss' };
+    }).filter(Boolean).slice(0, 6);
     out.note = typeof x.note === 'string' ? x.note.slice(0, 400) : '';
     out.src = ['auto', 'lore', 'hand'].includes(x.src) ? x.src : 'auto';
     return out;
+}
+
+/** Устойчивый короткий ключ убеждения — по его тексту (правка других строк его не сдвигает). */
+export function beliefId(t) {
+    let h = 2166136261;
+    for (const ch of String(t || '').toLowerCase().replace(/\s+/g, ' ').trim()) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+    return `b${(h >>> 0).toString(36)}`;
 }
 
 // ───────────── состояние ─────────────
@@ -87,7 +113,7 @@ export function normTemper(t) {
 /** Новое состояние: всё спокойно, характер — в точке темперамента. */
 export function fresh(temper) {
     const t = normTemper(temper);
-    return { fast: zero(), mood: zero(), base: { ...t.base }, will: 85, strain: 10, at: null, brk: null, hang: null, log: [] };
+    return { fast: zero(), mood: zero(), base: { ...t.base }, will: 85, strain: 10, mask: 0, at: null, brk: null, hang: null, bel: {}, hist: [], log: [] };
 }
 
 /** Починить состояние после загрузки (старый формат, пустые поля). */
@@ -100,6 +126,9 @@ export function heal(s, temper) {
     }
     s.will = clamp(s.will ?? f.will, 0, 100);
     s.strain = clamp(s.strain ?? f.strain, 0, 100);
+    s.mask = clamp(s.mask ?? 0, 0, 100);
+    if (!s.bel || typeof s.bel !== 'object' || Array.isArray(s.bel)) s.bel = {};
+    if (!Array.isArray(s.hist)) s.hist = [];
     if (!Array.isArray(s.log)) s.log = [];
     if (s.brk && typeof s.brk !== 'object') s.brk = null;
     if (s.hang && typeof s.hang !== 'object') s.hang = null;
@@ -120,7 +149,8 @@ export function eff(s, off = null) {
  *   strainIn — приток напряжения в час (боль, недосып, тревога за близкого);
  *   willMul  — множитель восстановления воли (недосып режет);
  *   willCap  — потолок воли (боль не даёт собраться);
- *   nights   — сколько ночей прошло;  sleepQ — насколько он выспался (0…1).
+ *   nights   — сколько ночей прошло;  sleepQ — насколько он выспался (0…1);
+ *   maskIn   — приток несказанного в час (тайны, которые держит; желания, о которых молчит).
  */
 export function decay(s, hours, temper, load = {}) {
     const t = normTemper(temper);
@@ -137,8 +167,12 @@ export function decay(s, hours, temper, load = {}) {
         }
         // напряжение: приток против естественного спада — к равновесию
         const k = Math.LN2 / (STRAIN_HL / t.recover);
-        const eq = clamp(num(load.strainIn) / k, 0, 100);
+        const eq = Math.max(0, num(load.strainIn)) / k;   // выше ста — значит, заполнится быстро и упрётся в потолок
         s.strain = clamp(eq + (s.strain - eq) * Math.exp(-k * h), 0, 100);
+        // несказанное: держит тайны и молчит о своём — копится; иначе выветривается
+        const km2 = Math.LN2 / MASK_HL;
+        const meq = Math.max(0, num(load.maskIn)) / km2;
+        s.mask = clamp(meq + (s.mask - meq) * Math.exp(-km2 * h), 0, 100);
         // воля: возвращается сама; под напряжением — хуже
         const press = s.strain > 50 ? 1 - (s.strain - 50) / 100 : 1;
         s.will += WILL_REGEN * t.grit * num(load.willMul, 1) * press * h;
@@ -171,11 +205,11 @@ export function mergeHits(a, b) {
 
 /**
  * С ним это случилось. hits — { blow: 2, held: 1 }. opts.raw — множитель «сырых нервов» на плохое (от нагрузок тела).
- * Возвращает, что сдвинулось: { val, aro, ctl, wor, will, strain }.
+ * Возвращает, что сдвинулось: { val, aro, ctl, wor, will, strain, mask }.
  */
 export function hit(s, hits, temper, opts = {}) {
     const t = normTemper(temper);
-    const d = { val: 0, aro: 0, ctl: 0, wor: 0, will: 0, strain: 0 };
+    const d = { val: 0, aro: 0, ctl: 0, wor: 0, will: 0, strain: 0, mask: 0 };
     // сырые нервы: чем выше напряжение, тем больнее плохое; после срыва — тем более
     const raw = Math.min(RAW_CAP, num(opts.raw, 1) * (1 + Math.max(0, s.strain - 55) / 90) * (s.hang ? 1.3 : 1));
     for (const [k, n] of Object.entries(hits || {})) {
@@ -197,7 +231,11 @@ export function hit(s, hits, temper, opts = {}) {
         }
         d.strain += H.strain * m;
         d.will += H.will * u * (H.will > 0 ? t.grit : 1);
+        const lv = Math.round(clamp(n, 0, 3));
+        if (k === 'held') d.mask += MASK_UP[lv];
+        if (k === 'open') d.mask -= MASK_DOWN[lv];
     }
+    s.mask = clamp(s.mask + d.mask, 0, 100);
     s.strain = clamp(s.strain + d.strain, 0, 100);
     s.will = clamp(s.will + d.will, 0, 100);
     for (const k of Object.keys(d)) d[k] = Math.round(d[k]);
@@ -316,4 +354,143 @@ export function auraOf(E, s) {
         size: Math.round(clamp(100 + E.aro * 0.12, 88, 114)),
         crack: !!(s.brk || s.hang || s.strain >= 75),
     };
+}
+
+// ───────────── маска: утечки ─────────────
+
+/** Насколько проступает то, что он прячет: 0 — держит, 1 — трещит, 2 — почти не держит. loose — тормоза сняты (алкоголь). */
+export function leakOf(s, loose = false) {
+    const m = s.mask + (loose ? 15 : 0);
+    const band = willBand(s.will);
+    if (m >= 80 || (m >= 60 && band === 0)) return 2;
+    if (m >= 70 || (m >= 55 && band <= 1)) return 1;
+    return 0;
+}
+
+// ───────────── что его возвращает ─────────────
+
+/** Сработало то, что его возвращает (её голос, счёт вслух, дело для рук): плохая вспышка гаснет быстро. */
+export function soothe(s) {
+    const d = { val: 0, aro: 0, ctl: 0, wor: 0, will: 6, strain: 0 };
+    for (const a of AXES) {
+        if (a === 'aro') { if (s.fast.aro > 0) { d.aro = -s.fast.aro * 0.45; s.fast.aro += d.aro; } continue; }
+        if (s.fast[a] < 0) { d[a] = -s.fast[a] * 0.45; s.fast[a] += d[a]; }
+        if (s.mood[a] < 0) s.mood[a] *= 0.85;
+    }
+    const st = Math.min(12, s.strain);
+    s.strain -= st; d.strain = -st;
+    s.will = clamp(s.will + 6, 0, 100);
+    for (const k of Object.keys(d)) d[k] = Math.round(d[k]);
+    return d;
+}
+
+// ───────────── убеждения ─────────────
+
+/** Прочность убеждения 0…100 (нет записи — нетронуто). */
+export const beliefHp = (s, id) => clamp(s.bel?.[id] ?? 100, 0, 100);
+/** Как убеждение держится: 3 — крепко, 2 — шатается, 1 — почти не держит, 0 — сломано. */
+export const beliefBand = (hp) => (hp >= 70 ? 3 : hp >= 35 ? 2 : hp > 0 ? 1 : 0);
+
+/**
+ * Поступок или слова задели убеждение: d от −2 (сильно поколебали) до +2 (сильно подтвердили).
+ * Точится медленно — это дело недель истории; подтверждается чуть быстрее. Сломанное не возвращается.
+ * Возвращает 'broken', когда прочность впервые дошла до нуля.
+ */
+export function beliefHit(s, id, d) {
+    const cur = beliefHp(s, id);
+    if (cur <= 0) return '';
+    const k = Math.round(clamp(d, -2, 2));
+    if (!k) return '';
+    const next = clamp(cur + (k < 0 ? k * 4 : k * 5), 0, 100);
+    s.bel[id] = next;
+    return next <= 0 ? 'broken' : '';
+}
+
+// ───────────── прогноз ─────────────
+
+/**
+ * Что будет, если ничего не менять: при тех же нагрузках (load, off) — через сколько часов истории
+ * нервы станут сырыми (rawIn), случится срыв (breakIn) и когда отпустит (calmIn). Часы или null.
+ * Срыв без событий бывает редко (воля сама возвращается) — чаще он случается в сцене; rawIn говорит, когда он станет близок.
+ */
+export function forecast(s, temper, load = {}, off = null, horizon = 72) {
+    const x = JSON.parse(JSON.stringify(s));
+    const out = { breakIn: null, rawIn: null, calmIn: null };
+    if (x.brk) return out;
+    const now = dominant(eff(x, off), x.base);
+    const wasRaw = x.strain >= 75;
+    for (let h = 1; h <= horizon; h++) {
+        decay(x, 1, temper, load);
+        if (out.breakIn == null && !x.hang && x.strain >= 88 && x.will <= 18) out.breakIn = h;
+        if (out.rawIn == null && !wasRaw && x.strain >= 75) out.rawIn = h;
+        if (out.calmIn == null && now.id && !dominant(eff(x, off), x.base).id) out.calmIn = h;
+    }
+    return out;
+}
+
+// ───────────── инициатива: шаг стоит воли ─────────────
+
+/** Сколько воли стоит шаг по своей инициативе. */
+export const INIT_COST = { care: 3, own: 4, plot: 4, gift: 5, talk: 6, court: 8, touch: 8, flirt: 10, spicy: 12 };
+const CLOSE_KINDS = ['talk', 'court', 'touch', 'flirt', 'spicy'];
+
+/**
+ * Хватит ли его на этот шаг. ctx.steps — сколько уже прожито вдвоём (каждая ступень удешевляет близкие шаги),
+ * ctx.loose — тормоза сняты. { ok, cost, why, bold }
+ */
+export function afford(s, dom, kind, ctx = {}) {
+    let cost = INIT_COST[kind] ?? 6;
+    if (CLOSE_KINDS.includes(kind)) cost *= Math.max(0.45, 1 - num(ctx.steps) * 0.04);
+    if (dom?.id === 'tender' || dom?.id === 'playful') cost *= 0.6;
+    if ((dom?.id === 'fear' || dom?.id === 'shame') && dom.step >= 2) cost *= 1.5;
+    if (ctx.loose) cost *= 0.6;
+    cost = Math.round(cost * 10) / 10;
+    if (s.brk) return { ok: false, cost, why: 'сейчас не до того — его несёт' };
+    if (dom?.id === 'fear' && dom.step >= 3 && CLOSE_KINDS.includes(kind)) return { ok: false, cost, why: 'страх держит: тянется и отдёргивает себя' };
+    if (dom?.id === 'shame' && dom.step >= 3 && CLOSE_KINDS.includes(kind)) return { ok: false, cost, why: 'стыд держит: считает, что не вправе' };
+    if (s.will - cost < 10) return { ok: false, cost, why: 'сил на это сейчас нет: выжат' };
+    return { ok: true, cost, why: '', bold: s.will >= 70 && (dom?.id === 'tender' || dom?.id === 'playful') };
+}
+
+/** Шаг сделан — воля потрачена. */
+export function spend(s, cost) {
+    const c = clamp(cost, 0, 40);
+    s.will = clamp(s.will - c, 0, 100);
+    return c;
+}
+
+// ───────────── сырые нервы и раздражительность ─────────────
+
+/** Нервы сырые: то, что обычно только задевает, сейчас бьёт сильнее. */
+export const rawNerves = (s) => !!s.hang || s.strain >= 60 || willBand(s.will) === 0;
+
+/** Как быстро сейчас тает его терпение (0.8 — в тепле, 1 — обычно, до 1.5 — на нервах). */
+export function edgeOf(s, dom) {
+    let e = 1 + clamp((s.strain - 40) / 120, 0, 0.4);
+    if (willBand(s.will) <= 1) e += 0.15;
+    if (dom?.id === 'anger') e += 0.08 * dom.step;
+    if (dom?.id === 'tender' || dom?.id === 'playful') e *= 0.85;
+    return Math.round(clamp(e, 0.8, 1.5) * 100) / 100;
+}
+
+// ───────────── плохая ночь ─────────────
+
+function rnd(seed) { let h = 2166136261; for (const ch of String(seed)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return ((h >>> 0) % 10000) / 10000; }
+
+/** Шанс плохой ночи: чем выше напряжение, тем вероятнее; недавний триггер и срыв — добавляют. */
+export function nightChance(s, ctx = {}) {
+    return Math.round(clamp((s.strain - 40) / 80 + (ctx.trig ? 0.35 : 0) + (s.hang ? 0.3 : 0), 0, 0.9) * 100) / 100;
+}
+/** Была ли ночь плохой. seed — чтобы свайп того же поста дал ту же ночь. */
+export const nightRoll = (s, seed, ctx = {}) => rnd(seed) < nightChance(s, ctx);
+
+// ───────────── кардиограмма ─────────────
+
+/** Запомнить, каким он был в этот день истории (последнее за день; хранится 60 дней). */
+export function sample(s, E, day) {
+    if (!day) return;
+    const row = { d: String(day), val: E.val, aro: E.aro, ctl: E.ctl, wor: E.wor, will: Math.round(s.will), strain: Math.round(s.strain) };
+    const k = s.hist.findIndex(x => x.d === row.d);
+    if (k >= 0) s.hist[k] = row; else s.hist.push(row);
+    if (s.hist.length > 60) s.hist.splice(0, s.hist.length - 60);
 }

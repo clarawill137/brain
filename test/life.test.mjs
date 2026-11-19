@@ -7,7 +7,7 @@ const world = { timestamp: { story_date: '2024-12-01', story_time: '10:00' }, sc
 const chat = [];
 const post = (name, user = false) => { chat.push({ name, is_user: user, is_system: false, mes: '…', horae_meta: { timestamp: { ...world.timestamp } } }); return chat.length - 1; };
 const handlers = {};
-const st = { ext: { brain: { auto: false } }, md: {}, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0 };
+const st = { ext: { brain: { auto: false } }, md: {}, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [] };
 
 const api = {
     ctx: () => ({ name1: 'Хеди Барлоу', extensionSettings: st.ext, chatMetadata: st.md, saveSettingsDebounced() {}, saveMetadataDebounced() {}, eventSource: { on() {} }, eventTypes: { CHAT_CHANGED: 'chat' } }),
@@ -44,8 +44,13 @@ const api = {
         trigAt: (i) => st.trig[i] || [],
         state: (who) => st.inner[first(who)] || null,
         setState: (who, id, why, i, src) => { if (!id) { delete st.inner[first(who)]; return true; } st.inner[first(who)] = { id, why, src, manual: false }; return true; },
+        under: () => null,
+        kept: (who) => st.kept[first(who)] || { n: 0, list: [] },
+        wants: (who) => st.wants[first(who)] || [],
+        fx: (who) => st.fx[first(who)] || [],
+        steps: () => ({ n: st.steps, themes: [] }),
     },
-    lore: { about: async () => 'Лор о нём.', card: () => 'Карточка.', core: () => '• говорит коротко', key: (w) => String(w).trim() },
+    lore: { about: async () => 'Лор о нём.', card: () => 'Карточка.', core: () => '• говорит коротко', key: (w) => String(w).trim(), coreAdd: (who, line) => { st.core.push([who, line]); return true; } },
     shelf: { tracker: (t) => { st.shelf.tracker = t; return true; }, mind: (f) => { st.shelf.mind = f; }, recs: (f) => { st.shelf.recs = f; }, open() {} },
 };
 
@@ -256,4 +261,186 @@ test('выключенный мозг молчит', () => {
     assert.equal(mod.sceneHtml(), '');
     assert.equal(brain.owns('Баки Барнс'), false);
     st.ext.brain.on = true;
+});
+
+
+// ───── 0.2 ─────
+
+const B = 'Баки Барнс';
+const live = () => st.md.brain.who[B];
+const fresh = async (h) => { hour(h); await click({ bact: 'reset', who: B }); const i = post(B); mod.afterPost(i, { psy: [] }, chat[i]); return i; };
+const next = (psy = [], who = B) => { const i = post(who); mod.afterPost(i, { psy }, chat[i]); return i; };
+
+test('0.2: «сдержался» копит несказанное, без сил оно проступает; «открылся» — отпускает', async () => {
+    await fresh(300);
+    next([{ who: 'Баки', held: 3, why: 'проглотил' }]);
+    next([{ who: 'Баки', held: 3, why: 'опять промолчал' }]);
+    next([{ who: 'Баки', held: 3, why: 'и снова' }]);
+    assert.ok(live().mask >= 70, `несказанное ${live().mask}`);
+    assert.ok(brain.view(B).leak >= 1);
+    assert.match(mod.prompt('normal'), /то, что прячет/);
+    assert.match(st.shelf.tracker.html(), /Несказанное/);
+    next([{ who: 'Баки', open: 3, why: 'наконец сказал ей' }]);
+    assert.ok(live().mask < 40);
+    assert.equal(brain.view(B).leak, 0);
+    assert.ok(!/то, что прячет/.test(mod.prompt('normal')));
+});
+
+test('0.2: тайны и несказанные желания держат маску поднятой', async () => {
+    await fresh(400);
+    st.kept['баки'] = { n: 4, list: ['знает, кто сдал базу'] };
+    st.wants['баки'] = [{ t: 'хочет съездить в Бруклин один', mes: -100, voiced: null }];
+    assert.match(st.shelf.tracker.html(), /тайны, которых не знает Хеди: 4/);
+    assert.match(st.shelf.tracker.html(), /молчит о своих желаниях: 1/);
+    hour(520);
+    next();
+    assert.ok(live().mask > 40, `за пять дней накопилось ${Math.round(live().mask)}`);
+    st.kept = {}; st.wants = {};
+});
+
+test('0.2: что возвращает — Летописец называет номер, вспышка гаснет', async () => {
+    await fresh(600);
+    change({ bin: 'f', k: 'fix', who: B }, 'её голос\nсчёт вслух\n\nдело для рук', { tagName: 'TEXTAREA' });
+    assert.deepEqual(st.ext.brain.prof[B].fix, ['её голос', 'счёт вслух', 'дело для рук']);
+    assert.match(mod.chron().input, /возвращает: \[1\] её голос, \[2\] счёт вслух, \[3\] дело для рук/);
+    next([{ who: 'Баки', threat: 3, bound: 2, why: 'её чуть не сбила машина' }]);
+    const hot = brain.view(B);
+    assert.match(mod.prompt('normal'), /что возвращает в себя/);
+    const i = next([{ who: 'Баки', fix: [1, 9, 1], why: 'она говорила с ним тихо' }]);
+    const cool = brain.view(B);
+    assert.ok(cool.emo.lvl < hot.emo.lvl && cool.strain < hot.strain);
+    assert.ok(st.shelf.recs(i).some(r => /сработало: её голос/.test(r.t)));
+});
+
+test('0.2: убеждение точится поступками, ломается — и просится в ядро характера', async () => {
+    await fresh(700);
+    change({ bin: 'b', k: 'beliefs', who: B }, 'я испорченный => я был оружием, а не убийцей', { tagName: 'TEXTAREA' });
+    const bel = st.ext.brain.prof[B].beliefs[0];
+    assert.ok(bel.id.startsWith('b') && bel.truth);
+    assert.match(mod.chron().input, new RegExp(`убеждения: \\[${bel.id}\\] «я испорченный»`));
+    next([{ who: 'Баки', blow: 2, why: 'вспомнил Даллас' }]);
+    assert.match(mod.prompt('normal'), /живёт с убеждением «я испорченный» — оно держится крепко/);
+    next([{ who: 'Баки', warm: 2, bel: [{ id: bel.id, d: -2 }, { id: 'чужое', d: -2 }], why: 'она поцеловала шов плоти и металла' }]);
+    assert.equal(live().bel[bel.id], 92);
+    assert.match(st.shelf.tracker.html(), /Убеждения/);
+    live().bel[bel.id] = 6;
+    const n = st.toasts.length;
+    next([{ who: 'Баки', bel: [{ id: bel.id, d: -2 }], why: 'он сам сказал: это были не мои руки' }]);
+    assert.equal(live().bel[bel.id], 0);
+    assert.equal(st.toasts.length, n + 1);
+    st.toasts[n][3].onclick();
+    assert.deepEqual(st.core[st.core.length - 1], [B, 'я был оружием, а не убийцей']);
+    assert.match(mod.prompt('normal'), /прежнее «я испорченный» больше не правда; теперь знает: я был оружием/);
+    assert.ok(!/убеждения:/.test(mod.chron().input), 'сломанное Летописцу больше не показываем');
+});
+
+test('0.2: инициатива стоит воли, прожитое её удешевляет; без сил — мнётся', async () => {
+    await fresh(800);
+    st.steps = 0;
+    const g = brain.afford(B, 'flirt');
+    assert.equal(g.ok, true);
+    assert.equal(g.cost, 10);
+    st.steps = 10;
+    assert.equal(brain.afford(B, 'flirt').cost, 6);
+    const will = live().will;
+    const i = post(B);
+    brain.spend(B, 'flirt', i);
+    mod.afterPost(i, { psy: [] }, chat[i]);
+    assert.ok(Math.abs(live().will - (will - 6)) < 0.5, `воля ${will} → ${live().will}`);
+    assert.ok(st.shelf.recs(i).some(r => /сам сделал шаг \(флирт\)/.test(r.t)));
+    // свайп: шаг не случился — воля на месте
+    mod.afterPost(i, { psy: [] }, chat[i]);
+    assert.ok(Math.abs(live().will - will) < 0.5);
+    live().will = 12;
+    const no = brain.afford(B, 'court');
+    assert.equal(no.ok, false);
+    assert.match(no.why, /сил/);
+    assert.ok(no.safe);
+    assert.equal(brain.afford('Хеди Барлоу', 'care'), null, 'за героиню игрока мозг не отвечает');
+    st.steps = 0;
+});
+
+test('0.2: сырые нервы и терпение — что Life спрашивает у мозга', async () => {
+    await fresh(900);
+    assert.equal(brain.raw(B), false);
+    assert.equal(brain.edge(B), 1);
+    live().strain = 75;
+    assert.equal(brain.raw(B), true);
+    assert.ok(brain.edge(B) > 1.2);
+    st.ext.brain.on = false;
+    assert.equal(brain.edge(B), 0, 'мозг выключен — Life считает по-старому');
+    assert.equal(brain.raw(B), false);
+    st.ext.brain.on = true;
+});
+
+test('0.2: химия — под алкоголем скрываемое ближе, обезболивающее глушит рану', async () => {
+    await fresh(1000);
+    st.hurt['баки'] = 2;
+    const sober = brain.view(B).E.val;
+    st.fx['баки'] = [{ what: 'морфин', left: 1e6 }];
+    assert.ok(brain.view(B).E.val > sober);
+    assert.match(st.shelf.tracker.html(), /под обезболивающим/);
+    st.hurt = {};
+    st.fx['баки'] = [{ what: 'выпил полбутылки виски', left: 1e6 }];
+    live().mask = 60; live().will = 30;
+    assert.match(mod.prompt('normal'), /под алкоголем/);
+    assert.ok(brain.view(B).leak >= 1);
+    st.fx = {};
+});
+
+test('0.2: день, который помнит телом', async () => {
+    await fresh(1100);
+    const d = new Date(2024, 11, 1, 10 + 1100);
+    change({ bin: 'd', k: 'dates', who: B }, `${d.getDate()}.${d.getMonth() + 1} — гибель Старков (вина)\nмусор без даты`, { tagName: 'TEXTAREA' });
+    const dates = st.ext.brain.prof[B].dates;
+    assert.equal(dates.length, 1);
+    assert.match(st.shelf.tracker.html(), /сегодня: гибель Старков/);
+    assert.match(mod.prompt('normal'), /сегодня гибель Старков — помнит этот день телом/);
+    assert.ok(brain.view(B).E.wor < -10);
+    hour(1100 + 24);
+    assert.ok(!/гибель Старков — помнит/.test(mod.prompt('normal')), 'на следующий день — уже нет');
+    change({ bin: 'd', k: 'dates', who: B }, '', { tagName: 'TEXTAREA' });
+});
+
+test('0.2: плохая ночь на нервах — утро другое; свайп даёт ту же ночь', async () => {
+    await fresh(1200);
+    let bad = false, i = 0;
+    for (let day = 1; day <= 12 && !bad; day++) {
+        live().strain = 100;
+        hour(1200 + day * 24);
+        i = next();
+        bad = !!live().night?.bad;
+    }
+    assert.equal(bad, true, 'за двенадцать ночей на пределе хоть одна плохая');
+    assert.equal(brain.night(B), true);
+    assert.match(mod.prompt('normal'), /ночь была плохой/);
+    assert.match(st.shelf.tracker.html(), /плохая ночь/);
+    mod.afterPost(i, { psy: [] }, chat[i]);
+    assert.equal(live().night.bad, true);
+    await click({ bact: 'rest', who: B });
+    assert.equal(brain.night(B), false, '«дать выспаться» ночь исправляет');
+});
+
+test('0.2: прогноз и кардиограмма в листе', async () => {
+    await fresh(1600);
+    hour(1624); next([{ who: 'Баки', warm: 2 }]);
+    hour(1648); next([{ who: 'Баки', loss: 3, why: 'она уехала' }]);
+    const html = st.shelf.tracker.html();
+    assert.match(html, /Кардиограмма/);
+    assert.match(html, /<polyline class="val"/);
+    assert.match(html, /отпустит через/);
+    st.hurt['баки'] = 4; st.sleep['баки'] = { debt: 20 }; st.stones = { who: 'Хеди Барлоу', mode: 'attack' };
+    live().will = 10;
+    assert.match(st.shelf.tracker.html(), /нервы станут сырыми|срыв через/);
+    st.hurt = {}; st.sleep = {}; st.stones = null;
+});
+
+test('0.2: тревога за неё выходит опекой, пока она рядом', async () => {
+    await fresh(1700);
+    st.stones = { who: 'Хеди Барлоу', mode: 'hum' };
+    live().fast.aro = 30; live().fast.ctl = -40;
+    assert.ok(!/выходит опекой/.test(mod.prompt('normal')), 'Камни просто гудят — фон, без опеки');
+    st.stones = { who: 'Хеди Барлоу', mode: 'attack' };
+    assert.match(mod.prompt('normal'), /тревога за близкого \(Хеди\) выходит опекой/);
+    st.stones = null;
 });

@@ -254,3 +254,150 @@ test('поручни: множители не складываются в лав
     const d = P.hit(s, { blow: 1 }, t, { raw: 3 });
     assert.ok(Math.abs(d.wor) <= P.STEP[1] * P.MUL_CAP * P.RAW_CAP + 1, `слабое событие осталось слабым: ${d.wor}`);
 });
+
+// ───── 0.2: маска, что возвращает, убеждения, прогноз, инициатива, ночь, история ─────
+
+test('маска: «сдержался» копит, «открылся» снимает, тайны держат её поднятой', () => {
+    const t = T();
+    const s = P.fresh(t);
+    P.hit(s, { held: 3 }, t); P.hit(s, { held: 3 }, t); P.hit(s, { held: 2 }, t);
+    assert.equal(s.mask, 68);
+    assert.ok(s.will < 40, 'держать лицо стоило воли');
+    assert.equal(P.leakOf(s), 1, 'после трёх «сдержался» сил мало — уже трещит');
+    s.will = 80;
+    assert.equal(P.leakOf(s), 0, 'воли хватает — держит');
+    s.will = 30;
+    assert.equal(P.leakOf(s), 1, 'сил мало — трещит');
+    s.will = 10;
+    assert.equal(P.leakOf(s), 2);
+    s.will = 80; s.mask = 45;
+    assert.equal(P.leakOf(s), 0);
+    assert.equal(P.leakOf({ ...s, mask: 58, will: 30 }, true) >= 1, true, 'под алкоголем ближе к поверхности');
+    P.hit(s, { open: 3 }, t);
+    assert.equal(s.mask, 0);
+    P.decay(s, 400, t, { maskIn: 0.75 });
+    assert.ok(s.mask > 34 && s.mask < 44, `три тайны держат маску около сорока: ${s.mask}`);
+    P.decay(s, 400, t, {});
+    assert.ok(s.mask < 1);
+});
+
+test('что возвращает: плохая вспышка гаснет, напряжение спадает; хорошее не трогает', () => {
+    const t = T();
+    const s = P.fresh(t);
+    P.hit(s, { threat: 3 }, t);
+    const before = P.dominant(P.eff(s), s.base);
+    const strain = s.strain;
+    P.soothe(s);
+    const after = P.dominant(P.eff(s), s.base);
+    assert.ok(after.lvl < before.lvl);
+    assert.ok(s.strain < strain);
+    const w = P.fresh(t); P.hit(w, { warm: 2 }, t);
+    const val = P.eff(w).val;
+    P.soothe(w);
+    assert.equal(P.eff(w).val, val);
+});
+
+test('убеждения: точатся неделями, подтверждаются быстрее, сломанное не возвращается', () => {
+    const t = T({ beliefs: [{ t: 'я испорченный', truth: 'я был оружием, а не убийцей' }] });
+    assert.equal(t.beliefs.length, 1);
+    const id = t.beliefs[0].id;
+    assert.equal(id, P.beliefId('Я  испорченный'), 'ключ — по тексту');
+    const s = P.fresh(t);
+    assert.equal(P.beliefHp(s, id), 100);
+    assert.equal(P.beliefBand(P.beliefHp(s, id)), 3);
+    P.beliefHit(s, id, -1);
+    assert.equal(P.beliefHp(s, id), 96);
+    P.beliefHit(s, id, 2);
+    assert.equal(P.beliefHp(s, id), 100);
+    let n = 0, got = '';
+    while (!got && n < 100) { got = P.beliefHit(s, id, -2); n++; }
+    assert.equal(got, 'broken');
+    assert.ok(n >= 12, `сильных поступков понадобилось ${n}`);
+    assert.equal(P.beliefHit(s, id, 2), '', 'сломанное не чинится');
+    assert.equal(P.beliefHp(s, id), 0);
+});
+
+test('прогноз: под тяжёлой нагрузкой — срыв, без нагрузки — когда отпустит', () => {
+    const t = T();
+    const s = P.fresh(t);
+    assert.deepEqual(P.forecast(s, t), { breakIn: null, rawIn: null, calmIn: null });
+    P.hit(s, { wrong: 3 }, t);
+    const f = P.forecast(s, t);
+    assert.equal(f.breakIn, null);
+    assert.ok(f.calmIn >= 1 && f.calmIn <= 24, `отпустит через ${f.calmIn} ч`);
+    const before = JSON.stringify(s);
+    const heavy = P.forecast(s, t, { strainIn: 5, willMul: 0.35, willCap: 15 });
+    assert.ok(heavy.breakIn >= 1 && heavy.breakIn <= 72, `срыв через ${heavy.breakIn} ч`);
+    assert.ok(heavy.rawIn >= 1 && heavy.rawIn <= heavy.breakIn, 'сначала сырые нервы, потом срыв');
+    const load = P.forecast(P.fresh(t), t, { strainIn: 5 });
+    assert.equal(load.breakIn, null, 'воля возвращается — сам по себе не сорвётся');
+    assert.ok(load.rawIn >= 5 && load.rawIn <= 30, `сырые нервы через ${load.rawIn} ч`);
+    assert.equal(JSON.stringify(s), before, 'прогноз состояние не трогает');
+});
+
+test('инициатива стоит воли: прожитое удешевляет, страх и стыд держат, без сил — не решится', () => {
+    const t = T();
+    const s = P.fresh(t);
+    const calm = { id: '', step: 0 };
+    assert.equal(P.afford(s, calm, 'flirt').cost, 10);
+    assert.equal(P.afford(s, calm, 'flirt', { steps: 10 }).cost, 6);
+    assert.equal(P.afford(s, calm, 'flirt', { steps: 40 }).cost, 4.5, 'дешевле половины не бывает');
+    assert.equal(P.afford(s, calm, 'care', { steps: 40 }).cost, 3, 'забота и так дешёвая');
+    assert.equal(P.afford(s, { id: 'tender', step: 2 }, 'court').cost, 4.8);
+    assert.equal(P.afford(s, { id: 'tender', step: 2 }, 'court').bold, true);
+    assert.equal(P.afford(s, { id: 'fear', step: 3 }, 'touch').ok, false);
+    assert.equal(P.afford(s, { id: 'fear', step: 3 }, 'care').ok, true, 'на заботу страх не влияет');
+    assert.equal(P.afford(s, { id: 'shame', step: 3 }, 'court').ok, false);
+    s.will = 15;
+    assert.equal(P.afford(s, calm, 'flirt').ok, false);
+    assert.equal(P.afford(s, calm, 'care').ok, true);
+    s.will = 50;
+    assert.equal(P.spend(s, 10), 10);
+    assert.equal(s.will, 40);
+});
+
+test('сырые нервы и раздражительность', () => {
+    const t = T();
+    const s = P.fresh(t);
+    assert.equal(P.rawNerves(s), false);
+    assert.equal(P.edgeOf(s, { id: '' }), 1);
+    assert.equal(P.edgeOf(s, { id: 'tender', step: 1 }), 0.85);
+    s.strain = 70;
+    assert.equal(P.rawNerves(s), true);
+    assert.ok(P.edgeOf(s, { id: 'anger', step: 2 }) > 1.3);
+    s.strain = 100; s.will = 5;
+    assert.equal(P.edgeOf(s, { id: 'anger', step: 4 }), 1.5, 'потолок');
+});
+
+test('плохая ночь: в покое не бывает, на нервах — вероятна; свайп даёт ту же ночь', () => {
+    const t = T();
+    const s = P.fresh(t);
+    assert.equal(P.nightChance(s), 0);
+    assert.equal(P.nightRoll(s, 'x'), false);
+    s.strain = 80;
+    assert.equal(P.nightChance(s), 0.5);
+    assert.equal(P.nightChance(s, { trig: true }), 0.85);
+    assert.equal(P.nightRoll(s, 'пост 12'), P.nightRoll(s, 'пост 12'));
+    s.strain = 100; s.hang = { until: null, mes: 0 };
+    assert.equal(P.nightChance(s, { trig: true }), 0.9);
+});
+
+test('кардиограмма: один замер на день, не больше шестидесяти дней', () => {
+    const t = T();
+    const s = P.fresh(t);
+    P.sample(s, P.eff(s), '2024-12-01');
+    P.hit(s, { loss: 3 }, t);
+    P.sample(s, P.eff(s), '2024-12-01');
+    assert.equal(s.hist.length, 1);
+    assert.ok(s.hist[0].val < 0);
+    for (let d = 0; d < 80; d++) P.sample(s, P.eff(s), `день ${d}`);
+    assert.equal(s.hist.length, 60);
+});
+
+test('темперамент: что возвращает, убеждения и даты чистятся', () => {
+    const t = P.normTemper({ fix: ['её голос', '', 5, 'счёт вслух'], beliefs: [{ t: '' }, { t: 'я испорченный' }], dates: [{ md: '12-16', t: 'гибель Старков', kind: 'blow' }, { md: '13-40', t: 'мусор' }, { md: '3-7', t: 'день рождения сестры' }] });
+    assert.deepEqual(t.fix, ['её голос', '5', 'счёт вслух']);
+    assert.equal(t.beliefs.length, 1);
+    assert.deepEqual(t.dates.map(d => d.md), ['12-16', '03-07']);
+    assert.equal(t.dates[1].kind, 'loss');
+});
