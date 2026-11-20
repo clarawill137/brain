@@ -1180,10 +1180,10 @@ test('0.8.2: персонаж игрока — мозг считает толь�
     st.md.brain.pairs = [];
     delete st.md.brain.me;
     await fresh(9700);
-    assert.deepEqual(brain.me(), { drunk: 0, hung: 0 });
+    assert.deepEqual(brain.me(), { drunk: 0, hung: 0, chem: null, comedown: null });
     assert.ok(!/персонаж игрока/.test(mod.prompt('normal')));
     const i = next([{ who: 'Хеди', drink: 3 }]);
-    assert.deepEqual(brain.me(), { drunk: 2, hung: 0 });
+    assert.deepEqual(brain.me(), { drunk: 2, hung: 0, chem: null, comedown: null });
     assert.equal(st.md.brain.who['Хеди Барлоу'], undefined, 'психики у персонажа игрока нет');
     const p = mod.prompt('normal');
     assert.match(p, /\[Хеди, персонаж игрока, — под градусом; со стороны видно: движения шире[\s\S]*решает игрок, за игрока не пиши/);
@@ -1205,13 +1205,13 @@ test('0.8.2: персонаж игрока — мозг считает толь�
     world.scene.characters_present = ['Баки Барнс', 'Хеди Барлоу'];
     // утро
     hour(9709);
-    assert.deepEqual(brain.me(), { drunk: 0, hung: 1 });
+    assert.deepEqual(brain.me(), { drunk: 0, hung: 1, chem: null, comedown: null });
     const m = mod.prompt('normal');
     assert.match(m, /\[Хеди, персонаж игрока, — с похмелья; со стороны видно: бледность/);
     assert.match(m, /Хеди с похмелья — присматривает по-своему: /);
     assert.match(st.shelf.tracker.html(), /🤕 Хеди: с похмелья[\s\S]*Похмелье ещё ~\d+ ч истории/);
     await click({ bact: 'me-sober' });
-    assert.deepEqual(brain.me(), { drunk: 0, hung: 0 });
+    assert.deepEqual(brain.me(), { drunk: 0, hung: 0, chem: null, comedown: null });
     assert.ok(!/персонаж игрока|присматривает по-своему/.test(mod.prompt('normal')));
     await click({ bact: 'me-drink' });
     assert.equal(brain.me().drunk, 1);
@@ -1226,7 +1226,7 @@ test('0.8.2: персонаж игрока — мозг считает толь�
     next([{ who: 'Хеди', drink: 3 }]);
     assert.equal(brain.me().drunk, 2);
     mechSet('booze', false);
-    assert.deepEqual(brain.me(), { drunk: 0, hung: 0 });
+    assert.deepEqual(brain.me(), { drunk: 0, hung: 0, chem: null, comedown: null });
     assert.ok(!/персонаж игрока/.test(mod.prompt('normal')));
     mechSet('booze', true);
     delete st.md.brain.me;
@@ -1698,4 +1698,196 @@ test('0.10: инициатива растёт из того, чего челов
     assert.ok(!/добивается:|ideas/.test(mod.chron(post(B)).input));
     mechSet('spine', true);
     change({ bin: 'sp', k: 'goal', who: B }, '', { tagName: 'TEXTAREA' });
+});
+
+// ───────────── 0.12 ─────────────
+test('0.12: Летописцу — «принял лекарство»; механика выключена — правила нет', () => {
+    change({ bin: 't', k: 'booze', who: B }, '1');      // обычный обмен: дальше считаем дозы как у всех
+    assert.match(mod.chron().rule, /"took": "sed" \(успокоительное[\s\S]*"pain" \(сильное обезболивающее[\s\S]*"stim" \(стимулятор[\s\S]*"dose": 1 \(обычная доза\)/);
+    assert.match(mod.chron().rule, /Для персонажа игрока — так же, отдельной строкой/);
+    mechSet('chem', false);
+    assert.ok(!/"took"/.test(mod.chron().rule));
+    mechSet('chem', true);
+});
+
+test('0.12: лекарство считается — стадия, манера в заметке, потом откат; само по себе чувства не создаёт', async () => {
+    await fresh(12000);
+    next([{ who: 'Баки', took: 'sed', dose: 2 }]);
+    assert.deepEqual(brain.view(B).chem, { sed: 2, pain: 0, stim: 0 });
+    assert.match(lastLog('chem').why, /седативное: сильная доза — под сильным седативным/);
+    let p = mod.prompt('normal');
+    assert.match(p, /под сильным седативным: заторможенность[\s\S]*чужую злость может не заметить вовсе/);
+    let html = st.shelf.tracker.html();
+    assert.match(html, /💊 Под сильным седативным/);
+    assert.match(html, /под седативным: чужую злость и страх считывает плохо — намёков не поймёт/);
+    assert.equal(brain.view(B).emo.id, '', 'седативное само чувства не создаёт');
+    // та же доза, названная в следующем посте, — не новая целиком
+    next([{ who: 'Баки', took: 'sed', dose: 2 }]);
+    assert.equal(brain.view(B).chem.sed, 2);
+    // прошло время: отпустило — откат, как похмелье
+    hour(12008);
+    const v = brain.view(B);
+    assert.equal(v.chem, null);
+    assert.deepEqual(v.comedown, { sed: 1, pain: 0, stim: 0 });
+    assert.equal(v.emo.id, '', 'и откат — тоже');
+    p = mod.prompt('normal');
+    assert.match(p, /седативное отпустило: вялость и туман в голове, а тревога вернулась/);
+    next();
+    assert.match(lastLog('chem').why, /седативное отпустило/);
+    html = st.shelf.tracker.html();
+    assert.match(html, /🫥 Седативное отпустило/);
+    assert.match(html, /откат после седативного: тревога вернулась и сон не идёт/);
+    hour(12040);
+    assert.equal(brain.view(B).comedown, null);
+    assert.equal(mod.prompt('normal'), '');
+    // стимулятор и обезболивающее — по каждой стадии: чувства из воздуха не берутся
+    for (const [kind, dose] of [['stim', 1], ['stim', 3], ['pain', 1], ['pain', 3], ['sed', 3]]) {
+        await fresh(12100 + dose * 7 + kind.length);
+        next([{ who: 'Баки', took: kind, dose }]);
+        assert.equal(brain.view(B).chem[kind], dose, `${kind} × ${dose}`);
+        assert.equal(brain.view(B).emo.id, '', `${kind} × ${dose}: чувства не создаёт`);
+    }
+});
+
+test('0.12: под веществом то же событие доходит иначе; сильное — на том же потолке', async () => {
+    await fresh(12300);
+    next([{ who: 'Баки', loss: 2, why: 'она уехала, не попрощавшись' }]);
+    const dry = lastLog().d.val;
+    await fresh(12320);
+    next([{ who: 'Баки', took: 'pain', dose: 2 }]);
+    next([{ who: 'Баки', loss: 2, why: 'она уехала, не попрощавшись' }]);
+    assert.ok(lastLog().d.val > dry, `под обезболивающим разлука глуше: ${lastLog().d.val} > ${dry}`);
+    assert.ok(lastLog().tags.includes('chem'));
+    assert.match(st.shelf.tracker.html(), /под веществом — иначе/);
+    // стимулятор: тёплое доходит живее
+    await fresh(12340);
+    next([{ who: 'Баки', warm: 2, why: 'обняла' }]);
+    const plain = lastLog().d.val;
+    await fresh(12360);
+    next([{ who: 'Баки', took: 'stim', dose: 2 }]);
+    next([{ who: 'Баки', warm: 2, why: 'обняла' }]);
+    assert.ok(lastLog().d.val > plain, `${lastLog().d.val} > ${plain}`);
+    // поручень: сильное событие лекарство не глушит и не раздувает
+    await fresh(12380);
+    next([{ who: 'Баки', blow: 3, why: 'унизили при всех' }]);
+    const hard = lastLog().d.wor;
+    await fresh(12400);
+    next([{ who: 'Баки', took: 'pain', dose: 3 }]);
+    next([{ who: 'Баки', blow: 3, why: 'унизили при всех' }]);
+    assert.equal(lastLog().d.wor, hard);
+});
+
+test('0.12: обезболивающее глушит свою рану, а когда отпускает — болит сильнее; сверхчеловеческий обмен выжигает и лекарства', async () => {
+    await fresh(12500);
+    st.hurt['баки'] = 3;
+    const raw = brain.view(B).E.val;
+    next([{ who: 'Баки', took: 'pain', dose: 2 }]);
+    assert.ok(brain.view(B).E.val > raw, 'под обезболивающим рана давит меньше');
+    assert.match(st.shelf.tracker.html(), /под обезболивающим/);
+    hour(12506);
+    assert.match(st.shelf.tracker.html(), /обезболивающее отпустило, болит сильнее/);
+    st.hurt = {};
+    // «как берёт» от 2 и выше — быстрый обмен: и лекарства почти не берут
+    change({ bin: 't', k: 'booze', who: B }, '4');
+    await fresh(12550);
+    next([{ who: 'Баки', took: 'sed', dose: 2 }]);
+    assert.equal(brain.view(B).chem, null);
+    assert.match(lastLog('chem').why, /почти не берёт/);
+    change({ bin: 't', k: 'booze', who: B }, '1');
+});
+
+test('0.12: руками — дать и снять; о лекарстве знает только Life — хотя бы первая стадия; механика выключена — как раньше', async () => {
+    await fresh(12600);
+    assert.match(st.shelf.tracker.html(), /data-bact="take" data-k="stim"/);
+    await click({ bact: 'take', who: B, k: 'stim' });
+    assert.equal(brain.view(B).chem.stim, 2);
+    assert.match(st.shelf.tracker.html(), /⚡ На взводе от стимулятора[\s\S]*снять всё/);
+    await click({ bact: 'sober', who: B });
+    assert.equal(brain.view(B).chem, null);
+    st.fx['баки'] = [{ what: 'вколол морфин', left: 1e6 }];
+    assert.equal(brain.view(B).chem.pain, 1);
+    mechSet('chem', false);
+    assert.equal(brain.view(B).chem, null);
+    next([{ who: 'Баки', took: 'stim', dose: 3 }]);
+    assert.equal(brain.view(B).chem, null);
+    st.fx = {};
+    mechSet('chem', true);
+});
+
+test('0.12: персонаж игрока — мозг считает только принятое; ботам — что видно со стороны, игроку — подсказка', async () => {
+    delete st.md.brain.me;
+    change({ bin: 'me', k: 'booze' }, 1);
+    await fresh(12700);
+    next([{ who: 'Хеди', took: 'pain', dose: 2 }]);
+    assert.deepEqual(brain.me(), { drunk: 0, hung: 0, chem: { sed: 0, pain: 2, stim: 0 }, comedown: null });
+    assert.equal(brain.list().includes('Хеди Барлоу'), false, 'психики у персонажа игрока по-прежнему нет');
+    const p = mod.prompt('normal');
+    assert.match(p, /\[Хеди, персонаж игрока, — под сильным обезболивающим; со стороны видно: зрачки узкие, взгляд плывёт[\s\S]*решает игрок, за игрока не пиши/);
+    assert.ok(!/тепло и далеко/.test(p), 'что персонаж игрока чувствует, модели не уходит');
+    let html = st.shelf.tracker.html();
+    assert.match(html, /💉 Хеди: под сильным обезболивающим/);
+    assert.match(html, /Подсказка\.[\s\S]*отпустит примерно за \d+ ч истории[\s\S]*потом откат/);
+    // со спиртным — оба в одной строке
+    next([{ who: 'Хеди', drink: 2 }]);
+    assert.match(mod.prompt('normal'), /персонаж игрока, — навеселе, под сильным обезболивающим; со стороны видно:/);
+    // свайп ответа не удваивает принятое
+    const at = next([{ who: 'Хеди', took: 'pain', dose: 1 }]);
+    const lvl = st.md.brain.me.chem.pain.lvl;
+    mod.afterPost(at, { psy: [{ who: 'Хеди', took: 'pain', dose: 1 }] }, chat[at]);
+    assert.equal(st.md.brain.me.chem.pain.lvl, lvl, 'свайп считает с того же места');
+    // руками: дать из настроек и снять всё
+    await click({ bact: 'me-sober' });
+    assert.deepEqual(brain.me(), { drunk: 0, hung: 0, chem: null, comedown: null });
+    await click({ bact: 'me-take', k: 'stim' });
+    assert.equal(brain.me().chem.stim, 2);
+    hour(12712);
+    assert.deepEqual(brain.me().comedown, { sed: 0, pain: 0, stim: 1 });
+    assert.match(mod.prompt('normal'), /персонаж игрока, — стимулятор отпустил; со стороны видно: вялость, зевает/);
+    hour(12760);
+    assert.deepEqual(brain.me(), { drunk: 0, hung: 0, chem: null, comedown: null });
+    delete st.md.brain.me; delete st.md.brain.meTol; delete st.md.brain.meTolBy;
+});
+
+test('0.12: «связь сравнялась» — мозг говорит и ждёт решения, сам «намертво» не переключает', async () => {
+    st.md.brain.circle = []; st.md.brain.circleAuto = false; st.pins = {}; st.md.brain.circlePins = [];
+    st.md.brain.pairs = [{ a: 'Хеди Барлоу', b: 'Баки Барнс', id: 'uneven', rom: 'hint', own: 'a', by: 'ai', why: 'одна уже любит' }];
+    await fresh(12800);
+    st.rel['баки>хеди'] = { love: 60, closeness: 70, trust: 60 };
+    for (let k = 0; k < 14; k++) next();
+    assert.equal(st.md.brain.pairs[0].near, undefined, 'пока шкалы не высоко — тихо');
+    st.rel['баки>хеди'] = { love: 90, closeness: 86, trust: 80 };
+    const toasts = st.toasts.length;
+    for (let k = 0; k < 11; k++) next();
+    assert.ok(st.md.brain.pairs[0].near, 'высоко — копим');
+    assert.ok(!/связь сравнялась/.test(st.shelf.tracker.html()), 'но ещё не продержалось');
+    for (let k = 0; k < 3; k++) next();
+    assert.equal(st.toasts.filter(t => /Похоже, связь сравнялась/.test(t[1])).length, 1, 'сказано один раз');
+    assert.ok(st.toasts.length > toasts);
+    const html = st.shelf.tracker.html();
+    assert.match(html, /Похоже, связь сравнялась\.[\s\S]*любовь 90 и близость 86[\s\S]*решаешь ты/);
+    assert.equal(st.md.brain.pairs[0].own, 'a', 'сам ничего не переключил');
+    // «нет, рано» — прячет надолго
+    await click({ bact: 'near-no', who: B, to: 'Хеди Барлоу' });
+    assert.ok(!/связь сравнялась/.test(st.shelf.tracker.html()));
+    for (let k = 0; k < 5; k++) next();
+    assert.ok(!/связь сравнялась/.test(st.shelf.tracker.html()));
+    assert.equal(st.toasts.filter(t => /Похоже, связь сравнялась/.test(t[1])).length, 1);
+    // шкалы упали — счёт сброшен
+    st.rel['баки>хеди'] = { love: 70, closeness: 86 };
+    next();
+    assert.equal(st.md.brain.pairs[0].near, undefined);
+    // снова высоко и надолго — и «да»
+    st.rel['баки>хеди'] = { love: 92, closeness: 88 };
+    for (let k = 0; k < 14; k++) next();
+    assert.match(st.shelf.tracker.html(), /да, теперь оба намертво/);
+    await click({ bact: 'near-yes', who: B, to: 'Хеди Барлоу' });
+    assert.deepEqual([st.md.brain.pairs[0].own, st.md.brain.pairs[0].hand, st.md.brain.pairs[0].near], ['both', true, undefined]);
+    assert.deepEqual(Object.keys(st.pins).sort(), ['баки>хеди', 'хеди>баки'], 'в настоящем — заперто с обеих сторон');
+    // за персонажа игрока мозг не судит: «намертво» только у бота — подсказки про сторону игрока нет
+    st.md.brain.pairs = [{ a: 'Хеди Барлоу', b: 'Баки Барнс', id: 'uneven', rom: 'hint', own: 'b' }];
+    st.rel['хеди>баки'] = { love: 95, closeness: 95 };
+    for (let k = 0; k < 14; k++) next();
+    assert.equal(st.md.brain.pairs[0].near, undefined);
+    delete st.rel['баки>хеди']; delete st.rel['хеди>баки'];
+    st.md.brain.pairs = []; st.pins = {}; st.md.brain.circlePins = [];
 });

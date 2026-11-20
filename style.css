@@ -192,3 +192,8 @@
 .brn-own select:disabled { opacity: .55; }
 .brn-by { margin: 6px 0 0; font-style: italic; }
 .brn-own + .brn-trope, .brn-by + .brn-trope { margin-top: 8px; }
+
+/* 0.12: «связь сравнялась» — подсказка под строкой пары */
+.brn-near { margin: 8px 0 0; padding: 10px 12px; border-radius: 14px; border: 1px dashed rgba(201, 138, 155, .55); background: rgba(201, 138, 155, .08); }
+.brn-near b { display: block; font: 600 13.5px var(--lf-sans); color: var(--lf-text); }
+.brn-near small { display: block; margin: 3px 0 8px; font-size: 12.5px; line-height: 1.4; color: var(--lf-dim); }

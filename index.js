@@ -12,8 +12,9 @@ import { hints } from './core/hints.js';
 import { SOFT, tie, pairStats, lens, haven, afterHurt, stayStyle, grudgeDecay } from './core/bonds.js';
 import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, ROM_NAME, tropeLine, tropeMul, ownSide, rejectOf, SPINE_KEYS, SPINE_NAME, hasSpine, spineLine } from './core/attach.js';
 import { STAGE_NAME, stageOf, tolOf, drink, sober, boozeNow, DRUNK, HUNG, SEEN, SEEN_HUNG, playerTips } from './core/booze.js';
+import { KINDS, KIND_NAME as CHEM_NAME, KIND_ICON as CHEM_ICON, STAGE as CHEM_STAGE, AFTER as CHEM_AFTER, stageOf as chemStage, chemTol, take, wear, chemStages, chemNow, chemLines, seenLines, chemTips } from './core/chem.js';
 
-const VERSION = '0.11.0';
+const VERSION = '0.12.0';
 const ID = 'brain';
 const TITLE = '🧠 Мозг';
 const NARR = /рассказчик|narrator|мастер|game ?master|(^|[^a-z])gm([^a-z]|$)|мнемозина/i;
@@ -31,8 +32,8 @@ const MAIN_AX = { fear: 'ctl', anger: 'val', shame: 'wor', low: 'val' };
 const NUDGE = [['warm', 'обогреть'], ['fun', 'рассмешить'], ['calm', 'успокоить'], ['win', 'дать победить'], ['open', 'дать выговориться'], ['threat', 'напугать'], ['blow', 'задеть'], ['bound', 'прижать'], ['wrong', 'разозлить'], ['loss', 'оставить в одиночестве']];
 const LEAK_NAME = ['держит при себе', 'проступает', 'почти не держит'];
 // механизмы, которые можно выключить по одному и посмотреть, что изменится
-const MECH = [['status', 'Качели статуса', 'когда привычная уверенность слетает или тихий вдруг выпрямляется'], ['style', 'Как привязывается и тропы пар', 'у каждого свой способ привязываться, у пары — свой сценарий'], ['spine', 'Стержень', 'чего добивается по его мнению и что ему нужно на самом деле'], ['booze', 'Алкоголь и похмелье', 'стадии опьянения, близорукость, утро после'], ['lens', 'Линза привязанности', 'любовь размывает мелкое плохое, уход и соперник бьют больнее'], ['dom', 'Доминанта', 'чувство держится и стягивает в себя постороннее'], ['catch', 'Заражение', 'близкие в сцене тянут друг друга'], ['recall', 'Память с чувством', 'прежнее всплывает в тон и возвращает часть себя'], ['home', 'Погода дома', 'свои на нервах — всем тяжелее'], ['wit', 'Юмор', 'каким юмором шутит в этом состоянии'], ['seq', 'Сцена и отклик', 'после сильного события: сначала реакция, потом развилка, потом решение']];
-const TAG_NAME = { drunk: 'спьяну — крупнее', trope: 'так у них заведено', blur: 'любовь размыла', glow: 'от своего теплее', deep: 'от своего — глубже и дольше', sour: 'накопилось — читает уколом', surprise: 'не ждал добра', haven: 'рядом свой — легче', pile: 'легло на то же чувство', forgive: 'больно, но ничего не меняет', grudge: 'осталась обида', cold: 'обида ещё держится' };
+const MECH = [['status', 'Качели статуса', 'когда привычная уверенность слетает или тихий вдруг выпрямляется'], ['style', 'Как привязывается и тропы пар', 'у каждого свой способ привязываться, у пары — свой сценарий'], ['spine', 'Стержень', 'чего добивается по его мнению и что ему нужно на самом деле'], ['booze', 'Алкоголь и похмелье', 'стадии опьянения, близорукость, утро после'], ['chem', 'Лекарства и вещества', 'седативное, обезболивающее, стимулятор: стадии и откат'], ['lens', 'Линза привязанности', 'любовь размывает мелкое плохое, уход и соперник бьют больнее'], ['dom', 'Доминанта', 'чувство держится и стягивает в себя постороннее'], ['catch', 'Заражение', 'близкие в сцене тянут друг друга'], ['recall', 'Память с чувством', 'прежнее всплывает в тон и возвращает часть себя'], ['home', 'Погода дома', 'свои на нервах — всем тяжелее'], ['wit', 'Юмор', 'каким юмором шутит в этом состоянии'], ['seq', 'Сцена и отклик', 'после сильного события: сначала реакция, потом развилка, потом решение']];
+const TAG_NAME = { drunk: 'спьяну — крупнее', chem: 'под веществом — иначе', trope: 'так у них заведено', blur: 'любовь размыла', glow: 'от своего теплее', deep: 'от своего — глубже и дольше', sour: 'накопилось — читает уколом', surprise: 'не ждал добра', haven: 'рядом свой — легче', pile: 'легло на то же чувство', forgive: 'больно, но ничего не меняет', grudge: 'осталась обида', cold: 'обида ещё держится' };
 const WIT_TEXT = { aff: 'если шутит — тепло и на двоих: смешит, чтобы стать ближе', self: 'если шутит — иронией над тем, что плохо: это способ держаться, а не веселье', aggr: 'если шутит — с зубами: сарказм, колкость, смешно и больно сразу', def: 'если шутит — над собой и раньше, чем это сделают другие' };
 // после сильного события ответ строится как «отклик» (Дуайт Суэйн: реакция → дилемма → решение), а сама реакция —
 // в порядке «чувство и тело → действие → слова». Иначе модель проживает и решает всё в одном посте
@@ -51,9 +52,9 @@ const SAFE = { court: 'заботой по мелочи, взглядом, шу�
 // что сейчас действует на человека (текст из «Способностей» Life)
 const FX = [
     ['alcohol', /алкогол|выпи[лв]|пьян|вино|виски|водк|бурбон|шампанск|пиво|коньяк|хмел/i],
-    ['sedative', /седатив|успокоит|транквил|снотворн|усыпл/i],
-    ['painkiller', /обезбол|морфин|анальг|анестет/i],
-    ['stim', /стимул|адреналин|кофеин|амфетам|энергетик/i],
+    ['sedative', /седатив|успокоит|транквил|снотворн|усыпл|барбитур|люминал|веронал|диазепам|валиум/i],
+    ['painkiller', /обезбол|морфи|опи[йаоу]|опиат|опиоид|кодеин|лауданум|анальг|анестет/i],
+    ['stim', /стимул|адреналин|кофеин|амфетам|бензедрин|первитин|кокаин|энергетик/i],
 ];
 
 let A = null;     // LifeBridge.api
@@ -233,6 +234,49 @@ function setPair(a, b, patch) {
     relCache.clear();
     saveM();
 }
+// ───────────── «догнал»: связь изменилась — мозг говорит об этом, а не переключает молча ─────────────
+const NEAR = { love: 85, close: 80, hold: 12, snooze: 40 };
+/** Кто в паре ещё не «намертво» (у пары с «намертво» в одну сторону): [кто, к кому] или null. Персонажа игрока не судим. */
+function nearSide(p) {
+    if (p.own !== 'a' && p.own !== 'b') return null;
+    const [from, to] = p.own === 'a' ? [p.b, p.a] : [p.a, p.b];
+    const U = user();
+    return from && to && !(U && A.sameName(from, U)) && mine(from) ? [from, to] : null;
+}
+/**
+ * После поста: у пары «намертво» в одну сторону, а у второго любовь и близость в Life уже высоко — копим, сколько
+ * ответов это держится. Продержалось — говорим игроку один раз (и показываем в «К кому как»); решает игрок.
+ */
+function nearCheck(i) {
+    if (!mech('style')) return;
+    let dirty = false;
+    for (const p of pairs()) {
+        const side = nearSide(p);
+        const r = side ? relTo(side[0], side[1]) : null;
+        const hi = !!r && num(r.love) >= NEAR.love && num(r.closeness) >= NEAR.close;
+        if (!hi) { if (p.near) { delete p.near; dirty = true; } continue; }
+        if (!p.near) { p.near = { since: i }; dirty = true; }
+        if (p.near.since > i) p.near.since = i;                                   // свайп или удалённые посты
+        if (!p.near.told && !p.near.no && aiSince(p.near.since, i) >= NEAR.hold) {
+            p.near.told = true; dirty = true;
+            safe(() => A.toast('info', `Похоже, связь сравнялась: у пары ${short(side[0])} и ${short(side[1])} любовь и близость с обеих сторон держатся высоко. Переключить на «оба намертво» или оставить — Сцена → ${TITLE} → «К кому как».`, TITLE, { timeOut: 9000 }));
+        }
+    }
+    if (dirty) saveM();
+}
+/** Созрела ли подсказка для пары who → to: { love, close, n } или null. «Нет, рано» прячет её на время. */
+function nearOf(who, to) {
+    const p = pairOf(who, to);
+    const side = p ? nearSide(p) : null;
+    if (!side || !p.near || !A.sameName(side[0], who)) return null;
+    const i = A.chatArr().length - 1;
+    if (p.near.no != null && aiSince(p.near.no, i) < NEAR.snooze) return null;
+    const n = aiSince(p.near.since, i);
+    if (n < NEAR.hold) return null;
+    const r = relTo(who, to);
+    return r ? { love: Math.round(num(r.love)), close: Math.round(num(r.closeness)), n } : null;
+}
+
 // ───────────── персонаж игрока: мозг его не ведёт — только считает выпитое ─────────────
 const meTol = () => P.clamp(M().meTol ?? cfg().meBooze ?? 1, 0.4, 6);
 function meLive() {
@@ -240,38 +284,59 @@ function meLive() {
     if (!m.me || typeof m.me !== 'object') m.me = { bac: 0, bacPeak: 0, hung: null, blank: false, drankAt: null, at: null };
     return m.me;
 }
-/** Что с персонажем игрока прямо сейчас: { s, stage, hung, blank } или null — ни хмеля, ни похмелья. */
+/** Лекарства персонажа игрока берут как всех; сверхчеловеческий обмен (переносимость от 2) — быстрее. */
+const meChemTol = () => chemTol({ booze: meTol() });
+/** Что с персонажем игрока прямо сейчас: { s, stage, hung, blank, chem } или null — ни хмеля, ни лекарств, ни отката. */
 function meNow() {
-    if (!on() || !mech('booze') || !M().me) return null;
+    if (!on() || !M().me || (!mech('booze') && !mech('chem'))) return null;
     const s = clone(M().me);
-    if (s.at) sober(s, hoursBetween(s.at, nowStamp()), meTol());
-    const stage = stageOf(s.bac);
-    const hung = s.hung ? Math.round(P.clamp(s.hung.lvl, 1, 2)) : 0;
-    return stage || hung ? { s, stage, hung, blank: !!s.blank } : null;
+    if (s.at) { const h = hoursBetween(s.at, nowStamp()); sober(s, h, meTol()); wear(s, h, meChemTol()); }
+    const stage = mech('booze') ? stageOf(s.bac) : 0;
+    const hung = mech('booze') && s.hung ? Math.round(P.clamp(s.hung.lvl, 1, 2)) : 0;
+    const chem = mech('chem') ? chemStages(s) : { on: {}, after: {}, any: false };
+    return stage || hung || chem.any ? { s, stage, hung, blank: !!s.blank, chem } : null;
 }
 /** Пост прошёл: время трезвит, Летописец называет, сколько выпито. */
 function mePost(i, rows, n) {
-    if (!mech('booze')) return;
+    if (!mech('booze') && !mech('chem')) return;
     const U = user();
-    const dn = U ? Math.max(0, ...rows.filter(r => r && A.sameName(r.who, U)).map(r => Math.round(P.clamp(r.drink, 0, 3)))) : 0;
-    if (!dn && !M().me) return;
+    const own = U ? rows.filter(r => r && A.sameName(r.who, U)) : [];
+    const dn = mech('booze') ? Math.max(0, ...own.map(r => Math.round(P.clamp(r.drink, 0, 3)))) : 0;
+    const tk = mech('chem') ? tookOf(own) : [];
+    if (!dn && !tk.length && !M().me) return;
     const s = meLive();
-    if (s.at) sober(s, hoursBetween(s.at, n), meTol());
+    if (s.at) { const h = hoursBetween(s.at, n); sober(s, h, meTol()); wear(s, h, meChemTol()); }
     s.at = n;
     if (dn) {
         const again = s.drankAt != null && i - s.drankAt <= 2;
         drink(s, dn, meTol(), again ? [1, 0.4, 0.7, 1][dn] : 1);
         s.drankAt = i;
     }
+    for (const [kind, d] of tk) takeOnce(s, kind, d, meChemTol(), i);
+}
+/** Что принято в строках Летописца: [[kind, доза 1…3]] — по одному на вещество, самая большая доза. */
+function tookOf(rows) {
+    const out = {};
+    for (const r of rows) { const k = String(r?.took || '').trim().toLowerCase(); if (KINDS.includes(k)) out[k] = Math.max(out[k] || 0, Math.round(P.clamp(r.dose ?? 1, 1, 3))); }
+    return Object.entries(out);
+}
+/** Принял: та же доза, названная в двух постах подряд (укол — и «подействовало»), — почти наверняка одна и та же. */
+function takeOnce(s, kind, d, tol, i) {
+    if (!s.tookAt || typeof s.tookAt !== 'object') s.tookAt = {};
+    const again = s.tookAt[kind] != null && i - s.tookAt[kind] <= 2;
+    const add = take(s, kind, d, tol, again ? [1, 0.25, 0.25, 0.5][d] : 1);
+    s.tookAt[kind] = i;
+    return add;
 }
 /** Руками: налить или протрезвить. Снимок свайпа обновляем, чтобы правка не откатилась. */
 function meHand(act) {
     const s = meLive();
     const n = nowStamp();
-    if (s.at) sober(s, hoursBetween(s.at, n), meTol());
+    if (s.at) { const h = hoursBetween(s.at, n); sober(s, h, meTol()); wear(s, h, meChemTol()); }
     s.at = n;
     if (act === 'drink') drink(s, 2, meTol());
-    else Object.assign(s, { bac: 0, bacPeak: 0, hung: null, blank: false, drankAt: null });
+    else if (KINDS.includes(act)) take(s, act, 2, meChemTol());
+    else Object.assign(s, { bac: 0, bacPeak: 0, hung: null, blank: false, drankAt: null, chem: {}, after: {}, fog: false, tookAt: {} });
     const m = M();
     if (m.snap) m.snap.me = JSON.stringify(m.me ?? null);
     saveM();
@@ -282,8 +347,13 @@ function meLine(here) {
     const me = meNow();
     const U = short(user());
     if (!me || !U || !inScene(user(), here)) return '';
-    const what = me.stage ? `${STAGE_NAME[me.stage]}; со стороны видно: ${SEEN[me.stage]}` : `${me.hung === 2 ? 'тяжёлое похмелье' : 'с похмелья'}; со стороны видно: ${SEEN_HUNG[me.hung]}`;
-    return `[${U}, персонаж игрока, — ${what} (считает Life по выпитому в истории). Что ${U} делает, говорит и чувствует — решает игрок, за игрока не пиши; остальные это замечают и откликаются каждый по-своему.]`;
+    const names = [], seen = [];
+    if (me.stage) { names.push(STAGE_NAME[me.stage]); seen.push(SEEN[me.stage]); }
+    else if (me.hung) { names.push(me.hung === 2 ? 'тяжёлое похмелье' : 'с похмелья'); seen.push(SEEN_HUNG[me.hung]); }
+    for (const line of seenLines(me.chem)) { const [n, ...rest] = line.split(' — '); names.push(n); seen.push(rest.join(' — ')); }
+    if (!names.length) return '';
+    const what = `${names.join(', ')}; со стороны видно: ${seen.join('; ')}`;
+    return `[${U}, персонаж игрока, — ${what} (считает Life по выпитому и принятому в истории). Что ${U} делает, говорит и чувствует — решает игрок, за игрока не пиши; остальные это замечают и откликаются каждый по-своему.]`;
 }
 
 const lifeOn = () => { try { return A.settings().enabled !== false; } catch { return true; } };
@@ -459,10 +529,16 @@ function signals(who, t = temperOf(who), s = stateOf(who)) {
     // химия: что сейчас действует
     const fx = new Set();
     for (const x of safe(() => S.fx?.(who) || [], [])) for (const [k, re] of FX) if (re.test(String(x?.what || ''))) fx.add(k);
-    const dull = fx.has('painkiller') ? 0.5 : 1;
+    // лекарства считает мозг (core/chem.js); о чём знает только Life («Способности») — хотя бы первая стадия
+    const cz = mech('chem') ? chemNow(s || {}, {
+        floor: { sed: fx.has('sedative') ? 20 : 0, pain: fx.has('painkiller') ? 20 : 0, stim: fx.has('stim') ? 20 : 0 },
+        drunk: mech('booze') ? stageOf(Math.max(num(s?.bac), fx.has('alcohol') ? 20 : 0)) : 0,
+        prone: P.clamp(0.3 - num(t.base.wor) / 60 + (rejectOf(t) - 1) * 0.4, 0, 1),
+    }) : null;
+    const dull = cz ? cz.dull : fx.has('painkiller') ? 0.5 : 1;
     const pain = P.clamp(safe(() => S.hurt?.(who)?.lvl, 0), 0, 4);
     if (pain > 0) {
-        add('pain', `рана (${SEV[pain]})${dull < 1 ? ' — под обезболивающим' : ''}`, { val: -5 * pain * dull, ctl: -3 * pain * dull, aro: 2 * pain * dull });
+        add('pain', `рана (${SEV[pain]})${dull < 1 ? ' — под обезболивающим' : dull > 1 ? ' — обезболивающее отпустило, болит сильнее' : ''}`, { val: -5 * pain * dull, ctl: -3 * pain * dull, aro: 2 * pain * dull });
         out.strainIn += 0.67 * pain * dull;
         out.willCap = Math.min(out.willCap, 100 - 10 * pain * dull);
     }
@@ -535,8 +611,21 @@ function signals(who, t = temperOf(who), s = stateOf(who)) {
             }
         }
     } else if (fx.has('alcohol')) { add('fx-alc', 'алкоголь: тормоза слабее', { ctl: -6, aro: 4 }); out.loose = true; }
-    if (fx.has('sedative')) { add('fx-sed', 'седативное', { aro: -15 }); out.strainIn -= 0.3; }
-    if (fx.has('stim')) { add('fx-stim', 'стимулятор', { aro: 12 }); out.raw *= 1.1; }
+    if (cz?.any) {
+        add('chem', cz.list.map(x => x.text).join(' · '), cz.off);
+        out.loose = out.loose || cz.loose;
+        out.drain += cz.drain;
+        out.raw *= cz.raw;
+        out.willCap = Math.min(out.willCap, cz.willCap);
+        out.strainIn += cz.strainIn;
+        out.sleepQ *= cz.sleepQ;
+        // стимулятор усталость не снимает, а откладывает: пока действует, недосып и «валится с ног» не давят на волю
+        if (cz.wake) { out.willCap = Math.max(out.willCap, Math.min(cz.willCap, 85)); out.willMul = Math.max(out.willMul, 0.8); }
+        out.chem = { ...cz, fog: cz.fog || !!s?.fog };
+    } else if (!mech('chem')) {
+        if (fx.has('sedative')) { add('fx-sed', 'седативное', { aro: -15 }); out.strainIn -= 0.3; }
+        if (fx.has('stim')) { add('fx-stim', 'стимулятор', { aro: 12 }); out.raw *= 1.1; }
+    }
     // день, который он помнит телом
     const md = mdOf(today);
     const dt = md ? t.dates.find(d => d.md === md) : null;
@@ -610,6 +699,7 @@ function view(who) {
     const s = clone(live);
     const h = s.at ? hoursBetween(s.at, nowStamp()) : 0;
     if (mech('booze')) sober(s, h, tolOf(t));
+    if (mech('chem')) wear(s, h, chemTol(t));
     const sig = signals(who, t, s);
     if (s.at) { P.decay(s, h, t, loadOf(sig)); driveDecay(s, h, t, around(who)); }
     else s.will = Math.min(s.will, sig.willCap);
@@ -619,7 +709,7 @@ function view(who) {
     const lastI = A.chatArr().length - 1;
     const hurt = s.hurtBy && lastI - num(s.hurtBy.mes) <= 8 ? s.hurtBy.kind : '';
     const sore = Object.entries(s.grudge || {}).filter(x => x[1] >= 30).sort((a, b) => b[1] - a[1])[0];
-    const extra = { jeal: P.jealStyle(s, E, dom), role: sig.role || 0, hurt, stay: hurt === 'stay' ? stayStyle(E, dom) : '', cosmic: !!sig.dear?.t.cosmic, grudge: sore ? short(sore[0]) : '', stuck: mech('dom') && P.stuck(s, dom, nowStamp().ts), style: mech('style') ? styleId(t.attach) : '', dear: !!sig.dear, hung: !!sig.booze?.hung || num(sig.booze?.stage) >= 3 };
+    const extra = { jeal: P.jealStyle(s, E, dom), role: sig.role || 0, hurt, stay: hurt === 'stay' ? stayStyle(E, dom) : '', cosmic: !!sig.dear?.t.cosmic, grudge: sore ? short(sore[0]) : '', stuck: mech('dom') && P.stuck(s, dom, nowStamp().ts), style: mech('style') ? styleId(t.attach) : '', dear: !!sig.dear, hung: !!sig.chem?.afterAny || !!sig.booze?.hung || num(sig.booze?.stage) >= 3 };
     if (mech('style')) {
         // проглотил несогласие со своим человеком — несколько ответов это видно; как именно — по способу привязываться
         if (s.swallow && lastI - num(s.swallow.mes) <= 6) extra.mute = STYLE_OBJECT[extra.style] || 'mute';
@@ -638,6 +728,7 @@ const initCtx = (who, v) => ({ steps: num(safe(() => A.senses?.steps?.(who, user
 const RULE = `
 psy — что этот пост (и пост игрока перед ним) сделал с ВНУТРЕННИМ состоянием персонажей из строки «Психика»: [{"who":"имя","blow":2,"held":1,"why":"из-за чего, 3–10 слов"}]. Только те, с кем что-то случилось; ни с кем — []. В строке — только ненулевые шкалы, каждая от 1 до 3 (1 — слегка, 2 — заметно, 3 — по-настоящему сильно; 3 ставь редко): warm — ему дали тепло, поддержку, нежность, признание; fun — смех, игра, флирт, азарт; win — справился, защитил, его послушали, получилось; calm — отдых, покой, безопасность, отпустило; threat — угроза ему или тем, кто ему дорог, опасность; blow — удар по самооценке: унизили, обесценили, пристыдили, напомнили о худшем в нём, сам себя винит; bound — потерял контроль: решили за него, скован, беспомощен, лишён выбора; wrong — с ним обошлись несправедливо, соврали, перешли границу, задели близкого; loss — утрата, разлука, отвергли, одиночество; rival — ревность: тот, кто ему дорог, отдал тепло или внимание другому, или кто-то претендует на его место рядом; held — сдержался: проглотил, промолчал, удержал лицо, хотя внутри кипело; open — открылся: сказал вслух то, что носил в себе, показал настоящее, выплакался, признался. Оценивай то, что случилось С НИМ, а не то, как он это показал: спокойное лицо после оскорбления — это blow и held. Обычный разговор без такого — не пиши ничего. Если это пришло от конкретного человека (в том числе от персонажа игрока) — добавь "by":"его имя" (у rival в by — тот, кто ему дорог); от двоих разное — две строки на одного who.
 Если в «Психике» у человека есть «возвращает» и в посте это с ним произошло и помогло — добавь в его строку "fix":[номера]. Если есть «убеждения» и поступок или слова в посте ПО-НАСТОЯЩЕМУ поколебали одно из них (−1 слегка, −2 сильно: ему на деле показали, что это не так, и он хоть на шаг это принял) или подтвердили (1, 2) — добавь "bel":[{"id":"b…","d":-1}]; дежурный комплимент убеждение не колеблет. Если человек в ЭТОМ посте пил спиртное — добавь в его строку "drink": 1 (глоток, бокал-другой), 2 (заметно: несколько порций) или 3 (много: бутылка, залпом, на спор); строка может состоять из одного "drink". То же — для персонажа игрока (его имя дано в «Психике»): если спиртное пил он, в этом или в предыдущем посте, добавь отдельную строку {"who":"его имя","drink":1}; других полей в ней не ставь.`;
+const RULE_CHEM = ` Если человек в ЭТОМ посте принял лекарство или вещество, которое меняет состояние, — добавь в его строку "took": "sed" (успокоительное, снотворное, транквилизатор, наркоз), "pain" (сильное обезболивающее: морфин и подобное; таблетка от головы не считается) или "stim" (стимулятор: амфетамин и подобное; чашка кофе не считается) и "dose": 1 (обычная доза), 2 (сильная или повторная) или 3 (слишком много); строка может состоять из одних "took" и "dose". Для персонажа игрока — так же, отдельной строкой: {"who":"его имя","took":"pain","dose":1}.`;
 
 /**
  * Пост игрока целиком — Летописцу. Life показывает ему только начало предыдущего поста, и всё, что игрок написал
@@ -678,7 +769,7 @@ function chron(i) {
         return bits.join('; ');
     });
     const full = safe(() => playerPost(i), '');
-    return { key: '"psy": []', rule: RULE, tokens: 85 + who.length * 50 + extra, input: `Психика (оцени, что с ними случилось в этих постах): ${cur.join(' | ')}${mech('booze') && user() ? ` | персонаж игрока: ${short(user())} (только выпитое)` : ''}${goals ? ' | в разделе идей (ideas) инициативу человека выводи из того, чего он добивается, а не из удобства сцены' : ''}${full ? `\nПост игрока целиком (выше он обрезан; учитывай его весь — во всех разделах):\n${full}` : ''}` };
+    return { key: '"psy": []', rule: RULE + (mech('chem') ? RULE_CHEM : ''), tokens: 85 + who.length * 50 + extra + (mech('chem') ? 25 : 0), input: `Психика (оцени, что с ними случилось в этих постах): ${cur.join(' | ')}${mech('booze') && user() ? ` | персонаж игрока: ${short(user())} (только выпитое)` : ''}${goals ? ' | в разделе идей (ideas) инициативу человека выводи из того, чего он добивается, а не из удобства сцены' : ''}${full ? `\nПост игрока целиком (выше он обрезан; учитывай его весь — во всех разделах):\n${full}` : ''}` };
 }
 
 function log(s, e) {
@@ -752,6 +843,9 @@ function afterPost(i, j, msg) {
             sober(s, hrs, tol);
             if (s.hung && num(s.hung.lvl) > was) log(s, { mes: i, src: 'drink', why: s.hung.lvl === 2 ? 'тяжёлое похмелье' : 'похмелье' });
         }
+        // лекарства уходят так же; ушли — откат
+        const ctol = chemTol(t);
+        if (mech('chem')) for (const k of wear(s, hrs, ctol)) log(s, { mes: i, src: 'chem', why: CHEM_AFTER[k][Math.round(P.clamp(s.after?.[k]?.lvl, 1, 2))] });
         const sig = signals(who, t, s);
         // время: вспышки гаснут, настроение оседает, воля возвращается, напряжение и несказанное идут к равновесию
         P.decay(s, hrs, t, { ...loadOf(sig), nights, sleepQ: sig.sleepQ * (nights && s.night?.bad ? 0.3 : 1) });
@@ -804,7 +898,15 @@ function afterPost(i, j, msg) {
             const st1 = stageOf(s.bac);
             log(s, { mes: i, src: 'drink', why: `спиртное: ${['', 'немного', 'заметно', 'много'][dn]}${st1 !== st0 ? ` — ${STAGE_NAME[st1]}` : st1 === 0 ? ' — почти не берёт' : ''}` });
         }
+        // принял лекарство — тоже считается сразу
+        if (mech('chem')) for (const [kind, d] of tookOf(mineRows)) {
+            const st0 = chemStage(s.chem?.[kind]?.lvl);
+            takeOnce(s, kind, d, ctol, i);
+            const st1 = chemStage(s.chem?.[kind]?.lvl);
+            log(s, { mes: i, src: 'chem', why: `${CHEM_NAME[kind]}: ${['', 'доза', 'сильная доза', 'слишком много'][d]}${st1 !== st0 ? ` — ${CHEM_STAGE[kind][st1]}` : st1 === 0 ? ' — почти не берёт' : ''}` });
+        }
         const bz = sig.booze;
+        const cz = sig.chem;
         for (const r of mineRows) {
             const h0 = P.cleanHits(r);
             if (!Object.keys(h0).length) continue;
@@ -832,6 +934,16 @@ function afterPost(i, j, msg) {
             if (bz?.stage) {
                 for (const [k, v] of Object.entries(h)) if (v <= 2 && k !== 'held') L.kmul[k] = (L.kmul[k] ?? 1) * (k === 'threat' ? bz.threat : bz.amp);
                 L.tags.push('drunk');
+            }
+            // под веществом: что-то доходит глуше, что-то — острее (сильное и так на потолке)
+            if (cz?.any) {
+                let touched = false;
+                for (const [k, v] of Object.entries(h)) {
+                    if (v > 2 || k === 'held') continue;
+                    const x = (cz.kmul[k] ?? 1) * (k === 'threat' ? 1 : cz.amp);
+                    if (x !== 1) { L.kmul[k] = (L.kmul[k] ?? 1) * x; touched = true; }
+                }
+                if (touched) L.tags.push('chem');
             }
             const d = { ...P.hit(s, h, t, { raw: sig.raw, kmul: L.kmul, kmood: L.kmood, drain: sig.drain }), ...driveHit(s, h, t) };
             const bad = Object.keys(h).some(k => P.NEGATIVE.includes(k));
@@ -961,6 +1073,7 @@ function afterPost(i, j, msg) {
         log(a.s, { mes: i, src: 'near', why: `рядом ${short(src.who)} (${domLabel(src.dom)}) — передаётся` });
     }
     for (let k = spends.length - 1; k >= 0; k--) if (spends[k].i <= i) spends.splice(k, 1);
+    safe(() => nearCheck(i));
     saveM();
     safe(() => A.saveMeta?.());
 }
@@ -1019,7 +1132,7 @@ function toneOf(v) {
     if (NEG.includes(dom.id) || s.brk) return '';
     const h = hourNow();
     const late = h >= 23 || (h >= 0 && h < 6);
-    if (dom.id === 'tender' || v.combo.some(c => c.id === 'rest') || sig.booze?.hung || s.hang || num(sig.drain) >= 1.2 || late) return 'soft';
+    if (dom.id === 'tender' || v.combo.some(c => c.id === 'rest') || sig.booze?.hung || sig.chem?.afterAny || sig.chem?.on.sed || sig.chem?.on.pain || s.hang || num(sig.drain) >= 1.2 || late) return 'soft';
     return dom.id === 'playful' ? 'play' : '';
 }
 
@@ -1068,6 +1181,11 @@ function note(who) {
     const bz = sig.booze;
     if (s.hang) bits.push(`после срыва — ${cassText(t, 'hang')}`);
     if (bz?.hung) bits.push(hungText(t, bz));
+    const cz = sig.chem;
+    const czLines = cz?.any ? chemLines(cz) : [];
+    // откат — фон, как похмелье; само вещество меняет манеру и идёт ниже, вместе с опьянением
+    const czOn = KINDS.filter(k => cz?.on[k]).length;
+    for (const line of czLines.slice(czOn)) bits.push(line);
     if (dom.id) {
         bits.push(`${domLabel(dom)} — ${cassOf(t, dom.id, dom.step)}`);
         if (dom.second) bits.push(`примесью — ${EMO_NAME[dom.second][Math.max(1, P.stepOf(dom.second, dom.all[dom.second])) - 1]}`);
@@ -1080,14 +1198,17 @@ function note(who) {
     if (mech('seq') && seqLive && SEQ_TEXT[num(s.seq.n)]) extra.push(SEQ_TEXT[num(s.seq.n)]);
     // пьян — это меняет всю манеру, поэтому идёт раньше остального
     if (bz?.stage) extra.push(drunkText(t, bz));
+    for (const line of czLines.slice(0, czOn)) extra.push(line);
     // персонаж игрока под градусом или с похмелья: близкий присматривает — каждый по-своему
     const me = meNow();
     // не каждый ответ, иначе выйдет «ты как?» через строчку: сразу после выпитого и потом раз в три ответа
     const meTick = A.chatArr().length - 1;
-    const meDue = me && (meTick % 3 === 0 || (me.s.drankAt != null && meTick - me.s.drankAt <= 1));
-    if (meDue && (me.stage >= 2 || me.hung) && !sig.worry && inScene(user())) {
+    const meDue = me && (meTick % 3 === 0 || (me.s.drankAt != null && meTick - me.s.drankAt <= 1) || Object.values(me.s.tookAt || {}).some(x => meTick - x <= 1));
+    const meChem = me ? KINDS.some(k => me.chem.on[k] >= 2 || me.chem.after[k]) : false;
+    if (meDue && (me.stage >= 2 || me.hung || meChem) && !sig.worry && inScene(user())) {
         const b = bondTo(who, user(), s, v.E, t);
-        if (b && b.t.L >= 0.5) extra.push(`${U} ${me.stage ? 'под градусом' : 'с похмелья'} — присматривает по-своему: ${cassText(t, 'care')}`);
+        const how = me.stage >= 2 ? 'под градусом' : meChem ? (KINDS.some(k => me.chem.on[k] >= 2) ? 'под лекарством' : 'в откате после лекарства') : 'с похмелья';
+        if (b && b.t.L >= 0.5) extra.push(`${U} ${how} — присматривает по-своему: ${cassText(t, 'care')}`);
     }
     const leak = P.leakOf(s, sig.loose);
     if (leak) extra.push(`${leak === 2 ? 'то, что прячет, уже почти не держится и может сорваться с языка' : 'то, что прячет, проступает сильнее обычного'}: ${cassText(t, 'leak')}`);
@@ -1163,6 +1284,8 @@ function ripeOf() {
         if (s.brk) found.push([9, `${W} на грани срыва`]);
         if (P.leakOf(s, sig.loose)) found.push([8, `${W} носит в себе несказанное, и оно просится наружу`]);
         if (num(sig.booze?.stage) >= 2) found.push([6, `${W} под градусом: что на уме, то сейчас и на языке`]);
+        if (num(sig.chem?.on.stim) >= 2) found.push([6, `${W} на взводе от стимулятора: тянет на рискованное, не сидится`]);
+        if (sig.chem?.afterAny) found.push([5, `у ${W} откат после лекарства: сил и терпения меньше обычного`]);
         if (sig.date) found.push([7, `сегодня ${sig.date.t} — ${W} помнит этот день`]);
         const weak = t.beliefs.map(b => [b, P.beliefHp(s, b.id)]).filter(([, hp]) => hp > 0 && hp <= 40).sort((a, b) => a[1] - b[1])[0];
         if (weak) found.push([6, `убеждение «${weak[0].t}», с которым живёт ${W}, вот-вот рухнет`]);
@@ -1534,7 +1657,7 @@ function deltaText(d) {
     if (!d) return '';
     return Object.entries(d).filter(([k, x]) => D_NAME[k] && Math.abs(x) >= 2).map(([k, x]) => `${D_NAME[k]} ${x > 0 ? '+' : '−'}${Math.abs(x)}`).join(', ');
 }
-const LOG_ICON = { drink: '🥃', brk: '⚡', hand: '✋', fix: '🫶', night: '🌙', init: '👣', bel: '🧱' };
+const LOG_ICON = { drink: '🥃', chem: '💊', brk: '⚡', hand: '✋', fix: '🫶', night: '🌙', init: '👣', bel: '🧱' };
 function logRow(e) {
     const kinds = e.hits ? Object.entries(e.hits).map(([k, n]) => `${KIND_NAME[k]} ${n}`).join(', ') : '';
     const head = LOG_ICON[e.src] || `#${e.mes}`;
@@ -1558,6 +1681,7 @@ function hintsHtml(v, who) {
         hurt: v.s.hurtBy && lastI - num(v.s.hurtBy.mes) <= 8 ? v.s.hurtBy.kind : '',
         feeder: fed ? { name: short(fed[0]), drive: low[0] } : null,
         booze: v.sig.booze ? { stage: v.sig.booze.stage, hung: v.sig.booze.hung, blank: v.sig.booze.blank } : null,
+        chem: v.sig.chem?.any ? { on: v.sig.chem.on, after: v.sig.chem.after, sed: v.sig.chem.sedDeep || 0, fog: v.sig.chem.fog } : null,
         spine: mech('spine') && hasSpine(v.t.spine) ? v.t.spine : null,
         ease: mech('style') ? STYLE_EASE[styleId(v.t.attach)] || '' : '',
         mute: v.combo.some(c => c.id === 'mute') ? STYLE_OBJECT[styleId(v.t.attach)] || 'mute' : '',
@@ -1588,7 +1712,9 @@ function bondsHtml(v, who) {
             ? `<select disabled aria-label="Намертво"><option>оба намертво — круг «своих»</option></select>`
             : `<select data-bin="own" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Кто привязан намертво">${opt('', tr.own || '', 'связь ещё складывается')}${opt(side(who), tr.own || '', `${short(who)} — намертво`)}${opt(side(b.to), tr.own || '', `${short(b.to)} — намертво`)}${opt('both', tr.own || '', 'оба намертво')}</select>`;
         const note = tr.hand ? '✋ вписано руками — ИИ не тронет' : tr.her ? 'так решила ты — ИИ не тронет' : tr.by === 'ai' ? `ИИ: ${tr.why || 'по истории'}` : '';
-        return `<div class="brn-own">${ownSel}</div>${note ? `<div class="lf-hint brn-by">${esc(note)}</div>` : ''}<div class="brn-trope"><select data-bin="tr" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Троп пары">${opt('', tr.id, 'троп не задан')}${TROPE_IDS.map(k => opt(k, tr.id, TROPES[k].name)).join('')}</select><select data-bin="rom" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Романтика"${tr.id ? '' : ' disabled'}>${Object.entries(ROM_NAME).map(([k, l]) => opt(k, tr.rom || 'no', l)).join('')}</select></div>
+        const nr = nearOf(who, b.to);
+        const near = nr ? `<div class="brn-near"><b>Похоже, связь сравнялась.</b><small>У ${esc(short(who))} к ${esc(short(b.to))} любовь ${nr.love} и близость ${nr.close} — держатся уже ответов: ${nr.n}. Мозг сам ничего не меняет: решаешь ты.</small><div class="lf-chips"><button class="lf-chip" data-bact="near-yes" data-who="${esc(who)}" data-to="${esc(b.to)}">да, теперь оба намертво</button><button class="lf-chip" data-bact="near-no" data-who="${esc(who)}" data-to="${esc(b.to)}">нет, рано</button></div></div>` : '';
+        return `<div class="brn-own">${ownSel}</div>${near}${note ? `<div class="lf-hint brn-by">${esc(note)}</div>` : ''}<div class="brn-trope"><select data-bin="tr" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Троп пары">${opt('', tr.id, 'троп не задан')}${TROPE_IDS.map(k => opt(k, tr.id, TROPES[k].name)).join('')}</select><select data-bin="rom" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Романтика"${tr.id ? '' : ' disabled'}>${Object.entries(ROM_NAME).map(([k, l]) => opt(k, tr.rom || 'no', l)).join('')}</select></div>
             ${TROPES[tr.id] ? `<div class="lf-hint">${esc(cap(TROPES[tr.id].dyn))}. Под давлением: ${esc(TROPES[tr.id].dark)}.</div>` : ''}`;
     };
     const row = (b) => {
@@ -1700,11 +1826,16 @@ function temperHtml(who, t) {
 /** Пьян или с похмелья: полоска «сколько в нём» и что это с ним делает. */
 function boozeHtml(v, who) {
     const bz = v.sig.booze;
-    if (!bz) return '';
+    const cz = v.sig.chem;
+    const chem = cz?.any ? [
+        ...KINDS.filter(k => cz.on[k]).map(k => { const st = k === 'sed' ? cz.sedDeep || cz.on.sed : cz.on[k]; const lvl = Math.round(num(v.s.chem?.[k]?.lvl)); return `<b>${CHEM_ICON[k]} ${esc(cap(CHEM_STAGE[k][st]))}</b><small>${esc(chemLines({ any: true, on: { [k]: st }, after: {}, sedDeep: k === 'sed' ? st : 0 })[0].split(': ').slice(1).join(': '))}</small>${lvl ? `<i><u style="width:${lvl}%"></u></i>` : ''}`; }),
+        ...KINDS.filter(k => cz.after[k] && !cz.on[k]).map(k => `<b>🫥 ${esc(cap(CHEM_AFTER[k][cz.after[k]]))}</b><small>ещё ~${Math.max(1, Math.round(num(v.s.after?.[k]?.left)))} ч истории: ${esc(chemLines({ any: true, on: {}, after: { [k]: cz.after[k] } })[0].split(': ').slice(1).join(': '))}</small>`),
+    ].join('') : '';
+    if (!bz) return chem ? `<div class="brn-booze">${chem}</div>` : '';
     const bac = Math.round(num(v.s.bac));
     const drunk = bz.stage ? `<b>🥃 ${esc(cap(STAGE_NAME[bz.stage]))}</b><small>${esc(DRUNK[bz.stage].split(': ').slice(1).join(': '))}${bz.heavy ? ' Сейчас спиртное раздувает тяжёлое.' : ''}</small>` : '';
     const hung = bz.hung ? `<b>🤕 ${bz.hung === 2 ? 'Тяжёлое похмелье' : 'Похмелье'}</b><small>ещё ~${Math.max(1, Math.round(num(v.s.hung?.left)))} ч истории: плохое бьёт сильнее, сил держать лицо меньше${bz.blank ? '; вчерашний вечер помнит кусками' : ''}</small>` : '';
-    return `<div class="brn-booze">${drunk}${bz.stage && bac ? `<i><u style="width:${bac}%"></u></i>` : ''}${hung}</div>`;
+    return `<div class="brn-booze">${drunk}${bz.stage && bac ? `<i><u style="width:${bac}%"></u></i>` : ''}${hung}${chem}</div>`;
 }
 /** Стержень: чего добивается по его мнению и что ему нужно на самом деле. */
 function spineHtml(v) {
@@ -1716,19 +1847,19 @@ function spineHtml(v) {
 
 /** Персонаж игрока под градусом или с похмелья: что видят боты и подсказка игроку. */
 function meHtml() {
-    if (!mech('booze')) return '';
     const me = meNow();
     if (!me) return '';
     const U = esc(short(user()));
     const bac = Math.round(num(me.s.bac));
-    const title = me.stage ? STAGE_NAME[me.stage] : me.hung === 2 ? 'тяжёлое похмелье' : 'с похмелья';
-    const seen = me.stage ? SEEN[me.stage] : SEEN_HUNG[me.hung];
-    const tips = playerTips(me.s, meTol());
-    return `<div class="brn-booze brn-me"><b>${me.stage ? '🥃' : '🤕'} ${U}: ${esc(title)}</b>
+    const names = [me.stage ? STAGE_NAME[me.stage] : me.hung ? (me.hung === 2 ? 'тяжёлое похмелье' : 'с похмелья') : '', ...KINDS.map(k => (me.chem.on[k] ? CHEM_STAGE[k][me.chem.on[k]] : me.chem.after[k] ? CHEM_AFTER[k][me.chem.after[k]] : ''))].filter(Boolean);
+    const seen = [me.stage ? SEEN[me.stage] : me.hung ? SEEN_HUNG[me.hung] : '', ...seenLines(me.chem).map(x => x.split(' — ').slice(1).join(' — '))].filter(Boolean);
+    const tips = [...(me.stage || me.hung ? playerTips(me.s, meTol()) : []), ...(me.chem.any ? chemTips(me.s, meChemTol()) : [])];
+    const icon = me.stage ? '🥃' : me.hung ? '🤕' : CHEM_ICON[KINDS.find(k => me.chem.on[k])] || '🫥';
+    return `<div class="brn-booze brn-me"><b>${icon} ${U}: ${esc(names.join(' · '))}</b>
         ${me.stage && bac ? `<i><u style="width:${bac}%"></u></i>` : ''}
-        <small>Ботам уходит только то, что видно со стороны: ${esc(seen)}. Как ${U} себя ведёт — решаешь ты.</small>
+        <small>Ботам уходит только то, что видно со стороны: ${esc(seen.join('; '))}. Как ${U} себя ведёт — решаешь ты.</small>
         ${tips.length ? `<small class="tip"><b>Подсказка.</b> ${esc(cap(tips.join('; ')))}.</small>` : ''}
-        <div class="lf-chips"><button class="lf-chip" data-bact="me-drink">налить ещё</button><button class="lf-chip" data-bact="me-sober">протрезвить</button></div></div>`;
+        <div class="lf-chips">${mech('booze') ? `<button class="lf-chip" data-bact="me-drink">${me.stage ? 'налить ещё' : 'налить'}</button>` : ''}<button class="lf-chip" data-bact="me-sober">${me.chem.any ? 'снять всё' : 'протрезвить'}</button></div></div>`;
 }
 
 function cardHtml(who) {
@@ -1740,8 +1871,9 @@ function cardHtml(who) {
             <label class="lf-switch"><input type="checkbox" data-bin="on" data-who="${esc(who)}"><span></span>${W}: включить код-мозг</label></div>`;
     }
     const bzTop = sig.booze;
-    const title = s.brk ? 'срыв' : dom.id ? domLabel(dom) : s.hang ? 'после срыва' : bzTop?.stage ? STAGE_NAME[bzTop.stage] : bzTop?.hung ? 'с похмелья' : 'ровно';
-    const sub = s.brk ? cassText(t, 'brk') : dom.id ? cassOf(t, dom.id, dom.step) : s.hang ? cassText(t, 'hang') : bzTop?.stage ? drunkText(t, bzTop) : bzTop?.hung ? hungText(t, bzTop) : 'ничего не давит — модели про состояние ничего не уходит';
+    const czTop = sig.chem?.any ? sig.chem : null;
+    const title = s.brk ? 'срыв' : dom.id ? domLabel(dom) : s.hang ? 'после срыва' : bzTop?.stage ? STAGE_NAME[bzTop.stage] : bzTop?.hung ? 'с похмелья' : czTop ? czTop.list[0].text : 'ровно';
+    const sub = s.brk ? cassText(t, 'brk') : dom.id ? cassOf(t, dom.id, dom.step) : s.hang ? cassText(t, 'hang') : bzTop?.stage ? drunkText(t, bzTop) : bzTop?.hung ? hungText(t, bzTop) : czTop ? chemLines(czTop)[0] : 'ничего не давит — модели про состояние ничего не уходит';
     const steps = dom.id && !s.brk ? `<span class="brn-steps">${Array.from({ length: P.EMO_STEPS[dom.id] }, (_, k) => `<i class="${k < dom.step ? 'on' : ''}"></i>`).join('')}</span>` : '';
     const band = P.willBand(s.will);
     const leak = P.leakOf(s, sig.loose);
@@ -1766,7 +1898,7 @@ function cardHtml(who) {
         ${marksHtml(s, who)}
         ${chartHtml(s)}
         ${A.sec('Руками', 'сдвинуть сейчас')}
-        <div class="lf-chips wrap">${NUDGE.map(([k, l]) => `<button class="lf-chip" data-bact="nudge" data-k="${k}" data-who="${esc(who)}">${l}</button>`).join('')}<button class="lf-chip" data-bact="rest" data-who="${esc(who)}">дать выспаться</button>${mech('booze') ? `<button class="lf-chip" data-bact="drink" data-who="${esc(who)}">налить</button>${num(s.bac) > 0 || s.hung ? `<button class="lf-chip" data-bact="sober" data-who="${esc(who)}">протрезвить</button>` : ''}` : ''}</div>
+        <div class="lf-chips wrap">${NUDGE.map(([k, l]) => `<button class="lf-chip" data-bact="nudge" data-k="${k}" data-who="${esc(who)}">${l}</button>`).join('')}<button class="lf-chip" data-bact="rest" data-who="${esc(who)}">дать выспаться</button>${mech('booze') ? `<button class="lf-chip" data-bact="drink" data-who="${esc(who)}">налить</button>` : ''}${mech('chem') ? KINDS.map(k => `<button class="lf-chip" data-bact="take" data-k="${k}" data-who="${esc(who)}">${CHEM_ICON[k]} ${CHEM_NAME[k]}</button>`).join('') : ''}${num(s.bac) > 0 || s.hung || sig.chem?.any ? `<button class="lf-chip" data-bact="sober" data-who="${esc(who)}">${sig.chem?.any ? 'снять всё' : 'протрезвить'}</button>` : ''}</div>
         ${temperHtml(who, t)}
         <label class="lf-switch"><input type="checkbox" data-bin="on" data-who="${esc(who)}" checked><span></span>${W}: код-мозг включён</label>
         <details class="lf-details" ${det('m')}><summary>Механизмы <small>для всех · выключи один — и смотри, что изменилось</small></summary>
@@ -1797,7 +1929,7 @@ function bodyHtml() {
             ${sw('aura', 'Ауры в Сцене')}
             ${sw('auto', 'Сам собирать темперамент и расставлять связи — ИИ, по карточкам, лорбукам и своду')}
             <div class="brn-rng"><label>Сколько твоего поста видит Летописец<b data-out>${Math.round(P.clamp(c.postChars ?? 6000, 700, 20000))}</b></label><input type="range" min="700" max="20000" step="100" value="${Math.round(P.clamp(c.postChars ?? 6000, 700, 20000))}" data-bin="me" data-k="post"><small>Знаков. Сам Life показывает Летописцу только первые 700 — мозг досылает пост целиком, чтобы не терялось то, что ты написала в конце.</small></div>
-            ${mech('booze') && user() ? `<div class="brn-rng"><label>Как алкоголь берёт ${esc(short(user()))}<b data-out>${meTol()}</b></label><input type="range" min="0.4" max="6" step="0.1" value="${meTol()}" data-bin="me" data-k="booze"><small>Твоего персонажа мозг не ведёт — только считает выпитое: стадию и похмелье. 0.6 — с бокала, 1 — как всех, 4 и выше — почти не берёт. ${M().meTolBy === 'ai' ? 'Сейчас — как решил ИИ при расстановке; сдвинешь — останется по-твоему.' : M().meTolBy === 'hand' ? '✋ Выставлено руками — ИИ не тронет.' : 'ИИ выставит при расстановке по истории; сдвинешь — останется по-твоему.'}</small></div>${meNow() ? '' : '<div class="lf-chips"><button class="lf-chip" data-bact="me-drink">налить</button></div>'}` : ''}
+            ${mech('booze') && user() ? `<div class="brn-rng"><label>Как алкоголь берёт ${esc(short(user()))}<b data-out>${meTol()}</b></label><input type="range" min="0.4" max="6" step="0.1" value="${meTol()}" data-bin="me" data-k="booze"><small>Твоего персонажа мозг не ведёт — только считает выпитое: стадию и похмелье. 0.6 — с бокала, 1 — как всех, 4 и выше — почти не берёт. ${M().meTolBy === 'ai' ? 'Сейчас — как решил ИИ при расстановке; сдвинешь — останется по-твоему.' : M().meTolBy === 'hand' ? '✋ Выставлено руками — ИИ не тронет.' : 'ИИ выставит при расстановке по истории; сдвинешь — останется по-твоему.'}</small></div><div class="lf-chips wrap">${meNow()?.stage ? '' : '<button class="lf-chip" data-bact="me-drink">🥃 налить</button>'}${mech('chem') ? KINDS.map(k => `<button class="lf-chip" data-bact="me-take" data-k="${k}">${CHEM_ICON[k]} ${CHEM_NAME[k]}</button>`).join('') : ''}</div><div class="lf-hint">Дать руками — если Летописец пропустил выпитое или принятое в посте.</div>` : ''}
             <div class="lf-field"><label>Что ИИ должен знать, когда расставляет <small>(необязательно)</small></label><textarea rows="4" data-bin="note" data-k="aiNote" placeholder="То, чего нет в карточках и лорбуках, или что важнее их: кто кому кто, по какому сценарию живёт пара, кого почти не берёт алкоголь.">${esc(str(c.aiNote, 1500))}</textarea></div>
             <div class="lf-hint">Уходит ИИ вместе с карточками и лорбуками — при расстановке по истории и при сборе темперамента. ${esc(smartLine())}</div>
             <div class="lf-hint">Мозг ${VERSION}. Летописец после каждого ответа называет, что случилось с человеком; оси, волю, напряжение и несказанное считает код, время — по Horae. Модель получает кассету — без цифр.${A.senses ? '' : ' Life старой версии: раны, недосып и Камни мозг пока не видит — обнови Life.'}</div>
@@ -1852,9 +1984,10 @@ function applyOp(s, t, op) {
         if (s.night) s.night.bad = false;
         log(s, { mes, src: 'hand', why: 'отдых: воля +40, напряжение −30' });
     }
-    if (op.act === 'reset') Object.assign(s, P.fresh(t), { at: nowStamp(), night: null, why: null, belBroke: null, recall: null, hurtBy: null, heldDay: null, jealTo: '', feed: {}, drf: {}, grudge: {}, seq: null, filled: false, bac: 0, bacPeak: 0, hung: null, blank: false, drankAt: null, swallow: null, dare: null, won: null, dr: freshDrives() });
+    if (op.act === 'reset') Object.assign(s, P.fresh(t), { at: nowStamp(), night: null, why: null, belBroke: null, recall: null, hurtBy: null, heldDay: null, jealTo: '', feed: {}, drf: {}, grudge: {}, seq: null, filled: false, bac: 0, bacPeak: 0, hung: null, blank: false, drankAt: null, chem: {}, after: {}, fog: false, tookAt: {}, swallow: null, dare: null, won: null, dr: freshDrives() });
     if (op.act === 'drink') { drink(s, 2, tolOf(t)); log(s, { mes, src: 'drink', why: `налито руками — ${STAGE_NAME[stageOf(s.bac)]}` }); }
-    if (op.act === 'sober') { s.bac = 0; s.bacPeak = 0; s.hung = null; s.blank = false; log(s, { mes, src: 'hand', why: 'хмель снят руками' }); }
+    if (op.act === 'sober') { s.bac = 0; s.bacPeak = 0; s.hung = null; s.blank = false; s.chem = {}; s.after = {}; s.fog = false; s.tookAt = {}; log(s, { mes, src: 'hand', why: 'хмель и лекарства сняты руками' }); }
+    if (op.act === 'take' && KINDS.includes(op.k)) { take(s, op.k, 2, chemTol(t)); log(s, { mes, src: 'chem', why: `${CHEM_NAME[op.k]} — руками: ${CHEM_STAGE[op.k][chemStage(s.chem?.[op.k]?.lvl)] || 'почти не берёт'}` }); }
     if (op.act === 'feed' && P.DRIVES.includes(op.k)) { healDrives(s); s.dr[op.k] = P.clamp(s.dr[op.k] + num(op.d), 0, 100); }
     if (op.act === 'unmark') s.marks = s.marks.filter(x => x.id !== op.id);
     if (op.act === 'unbrk' && s.brk) {
@@ -1892,6 +2025,10 @@ async function onClick(ev) {
         if (act === 'nudge' && KIND_NAME[el.dataset.k]) manual(who, { act: 'nudge', k: el.dataset.k });
         if (act === 'rest') manual(who, { act: 'rest' });
         if (act === 'drink' || act === 'sober') manual(who, { act });
+        if (act === 'take' && KINDS.includes(el.dataset.k)) manual(who, { act, k: el.dataset.k });
+        if (act === 'near-yes' && pairOf(who, el.dataset.to)) { setPair(who, el.dataset.to, { own: 'both', hand: true }); const p = pairOf(who, el.dataset.to); if (p) delete p.near; saveM(); syncPins(); safe(() => A.updatePrompt()); refresh(); }
+        if (act === 'near-no') { const p = pairOf(who, el.dataset.to); if (p?.near) { p.near.no = A.chatArr().length - 1; saveM(); } refresh(); }
+        if (act === 'me-take' && KINDS.includes(el.dataset.k)) { meHand(el.dataset.k); refresh(); }
         if (act === 'bonds-fill') {
             let r = null;
             const run = async () => { r = await fillCast({ force: true }); };
@@ -2056,11 +2193,11 @@ globalThis.LifeBrain = {
     /** Состояние во «Внутри» ведёт мозг — Life не шлёт вторую заметку о нём. */
     owns: (who) => safe(() => on() && cfg().drive !== false && mine(who), false),
     list: () => safe(() => (on() ? list() : []), []),
-    /** { E: оси, emo: { id, step, lvl, name }, will, strain, mask, leak, brk, hang, drunk: стадия 0…4, hung: похмелье 0…2, attach: способ привязываться, spine: стержень, dr: потребности, combo: [id], jeal, role, wit, dear: { to, L, blur, haven, fuse, dread, trope } } или null */
+    /** { E: оси, emo: { id, step, lvl, name }, will, strain, mask, leak, brk, hang, drunk: стадия 0…4, hung: похмелье 0…2, chem: { sed, pain, stim } — стадии 0…3 или null, comedown — откаты 0…2 или null, attach: способ привязываться, spine: стержень, dr: потребности, combo: [id], jeal, role, wit, dear: { to, L, blur, haven, fuse, dread, trope } } или null */
     view: (who) => safe(() => {
         if (!on() || !mine(who)) return null;
         const v = view(who);
-        return { E: v.E, emo: { id: v.dom.id, step: v.dom.step, lvl: v.dom.lvl, name: domLabel(v.dom) }, will: Math.round(v.s.will), strain: Math.round(v.s.strain), mask: Math.round(v.s.mask), leak: P.leakOf(v.s, v.sig.loose), brk: !!v.s.brk, hang: !!v.s.hang, dr: Object.fromEntries(P.DRIVES.map(k => [k, Math.round(v.s.dr[k])])), combo: v.combo.map(c => c.id), drunk: num(v.sig.booze?.stage), hung: num(v.sig.booze?.hung), attach: mech('style') ? styleId(v.t.attach) : '', spine: mech('spine') && hasSpine(v.t.spine) ? { ...v.t.spine } : null, jeal: Math.round(num(v.s.jeal)), role: num(v.s.role), wit: v.wit || '', dear: v.sig.dear ? { to: v.sig.dear.to, L: v.sig.dear.t.L, cosmic: !!v.sig.dear.t.cosmic, trope: v.sig.dear.tr?.id || '', ...v.sig.dear.st } : null, grudge: { ...(v.s.grudge || {}) }, seq: v.s.seq ? num(v.s.seq.n) : null };
+        return { E: v.E, emo: { id: v.dom.id, step: v.dom.step, lvl: v.dom.lvl, name: domLabel(v.dom) }, will: Math.round(v.s.will), strain: Math.round(v.s.strain), mask: Math.round(v.s.mask), leak: P.leakOf(v.s, v.sig.loose), brk: !!v.s.brk, hang: !!v.s.hang, dr: Object.fromEntries(P.DRIVES.map(k => [k, Math.round(v.s.dr[k])])), combo: v.combo.map(c => c.id), drunk: num(v.sig.booze?.stage), hung: num(v.sig.booze?.hung), chem: v.sig.chem && KINDS.some(k => v.sig.chem.on[k]) ? { ...v.sig.chem.on } : null, comedown: v.sig.chem?.afterAny ? { ...v.sig.chem.after } : null, attach: mech('style') ? styleId(v.t.attach) : '', spine: mech('spine') && hasSpine(v.t.spine) ? { ...v.t.spine } : null, jeal: Math.round(num(v.s.jeal)), role: num(v.s.role), wit: v.wit || '', dear: v.sig.dear ? { to: v.sig.dear.to, L: v.sig.dear.t.L, cosmic: !!v.sig.dear.t.cosmic, trope: v.sig.dear.tr?.id || '', ...v.sig.dear.st } : null, grudge: { ...(v.s.grudge || {}) }, seq: v.s.seq ? num(v.s.seq.n) : null };
     }, null),
     /** Нервы сырые — сработавший триггер бьёт на ступень сильнее (triggers.js). */
     raw: (who) => safe(() => on() && mine(who) && P.rawNerves(view(who).s), false),
@@ -2084,7 +2221,7 @@ globalThis.LifeBrain = {
     night: (who) => safe(() => { if (!on() || !mine(who)) return false; const s = stateOf(who); return !!s.night?.bad && s.night.day === nowStamp().day; }, false),
     open: (who) => safe(() => openBrain(who)),
     /** Персонаж игрока: { drunk: стадия 0…4, hung: похмелье 0…2 } — мозг его не ведёт, только считает выпитое. */
-    me: () => safe(() => { const me = meNow(); return { drunk: me?.stage || 0, hung: me?.hung || 0 }; }, { drunk: 0, hung: 0 }),
+    me: () => safe(() => { const me = meNow(); return { drunk: me?.stage || 0, hung: me?.hung || 0, chem: me && KINDS.some(k => me.chem.on[k]) ? { ...me.chem.on } : null, comedown: me && KINDS.some(k => me.chem.after[k]) ? { ...me.chem.after } : null }; }, { drunk: 0, hung: 0 }),
     /** Прогнать фоновую настройку сейчас: круг «своих», способы привязываться по умолчанию, сбор темперамента. */
     ensure: () => ensure(),
 };
