@@ -7,7 +7,7 @@ const world = { timestamp: { story_date: '2024-12-01', story_time: '10:00' }, sc
 const chat = [];
 const post = (name, user = false) => { chat.push({ name, is_user: user, is_system: false, mes: '…', horae_meta: { timestamp: { ...world.timestamp } } }); return chat.length - 1; };
 const handlers = {};
-const st = { depth: null, ext: { brain: { auto: false } }, md: { brain: { circle: [] } }, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [], faces: [], rel: {}, story: null, fill: [], pins: {} };
+const st = { depth: null, ext: { brain: { auto: false } }, md: { brain: { circle: [] } }, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [], faces: [], rel: {}, story: null, fill: [], deep: [], route: null, pins: {} };
 
 const api = {
     ctx: () => ({ name1: 'Хеди Барлоу', extensionSettings: st.ext, chatMetadata: st.md, saveSettingsDebounced() {}, saveMetadataDebounced() {}, eventSource: { on() {} }, eventTypes: { CHAT_CHANGED: 'chat' } }),
@@ -30,8 +30,10 @@ const api = {
     openSheet() {},
     withBusy: async (_el, fn) => fn(),
     cardOf: () => ({ description: 'Бывший Зимний солдат. Сдержан, говорит коротко.' }),
-    askJson: async () => {
+    askJson: async (messages) => {
         st.asked++;
+        const own = st.route ? st.route(messages || []) : null;
+        if (own) return own;
         return { ...(st.depth || {}), note: 'Держится ровно, вину носит молча.', base: { val: -5, aro: 5, ctl: 28, wor: -18 }, react: 0.9, recover: 0.7, grit: 1.5, sens: { blow: 1.4, bound: 1.5, threat: 0.7, warm: 0.8, wrong: 1, loss: 1.2 },
             cass: { shame: ['отводит глаза и трёт запястье живой руки', 'замолкает и уходит чинить что-нибудь руками', 'отказывается от её рук: «не надо, я грязный»', 'лицо пустеет, отвечает рапортом'], brk: 'лицо пустеет, тело собирается, речь сжимается до односложных рапортов' } };
     },
@@ -55,7 +57,8 @@ const api = {
     story: { ready: () => !!st.story, felt: (who, w = 2) => (st.story?.felt || []).filter(f => f.w >= w) },
     relPin: (a, b, v) => { const k = `${first(a)}>${first(b)}`; if (st.pins[k]) return false; st.pins[k] = v; return true; },
     relUnpin: (a, b) => { const k = `${first(a)}>${first(b)}`; if (!st.pins[k]) return false; delete st.pins[k]; return true; },
-    askFillJson: async (messages, tokens, o, opts) => { st.fill.push({ messages, tokens, opts }); return api.askJson(); },
+    askFillJson: async (messages, tokens, o, opts) => { st.fill.push({ messages, tokens, opts }); return api.askJson(messages); },
+    askDeepJson: async (messages, tokens) => { st.deep.push({ messages, tokens }); return api.askJson(messages); },
     lore: { about: async () => 'Лор о нём.', card: () => 'Карточка.', core: () => '• говорит коротко', key: (w) => String(w).trim(), coreAdd: (who, line) => { st.core.push([who, line]); return true; } },
     shelf: { tracker: (t) => { st.shelf.tracker = t; return true; }, mind: (f) => { st.shelf.mind = f; }, recs: (f) => { st.shelf.recs = f; }, open() {} },
 };
@@ -802,12 +805,13 @@ test('0.6: заражение зависит от того, что между н
 
 // ───── 0.7: космическая привязанность, обида, отклик на сильное ─────
 
-test('0.7: «свои» — круг заполняется сам, в Life им запираются любовь и близость', async () => {
+test('0.7: «свои» — круг сам не заполняется (имён в коде нет); вписанным в Life запираются любовь и близость', async () => {
     delete st.md.brain.circle;
     st.pins = {};
     await fresh(6000);
-    assert.match(st.shelf.tracker.html(), /Свои[\s\S]*Хеди, Баки, Наташа, Тони, Елена/);
-    assert.deepEqual(st.md.brain.circle, ['Хеди', 'Баки', 'Наташа', 'Тони', 'Елена']);
+    assert.deepEqual(st.md.brain.circle, [], 'по умолчанию — никого');
+    assert.match(st.shelf.tracker.html(), /Свои[\s\S]*никого/);
+    assert.deepEqual(st.pins, {}, 'и замков нет');
     change({ bin: 'circle' }, 'Хеди\nБаки', { tagName: 'TEXTAREA' });
     assert.deepEqual(st.md.brain.circle, ['Хеди', 'Баки']);
     assert.deepEqual(Object.keys(st.pins).sort(), ['баки>хеди', 'хеди>баки']);
@@ -888,6 +892,8 @@ test('0.7: тёмная сторона — за своего на что уго�
 const setStyle = (id, who = B) => change({ bin: 'ts', k: 'attach', who }, id, { tagName: 'SELECT' });
 const mechSet = (k, v) => change({ bin: 'm', k }, '', { checked: v });
 /** Три ответа подряд в тихой сцене: что за них ушло модели. */
+/** Пара «свои» с тропом — как её расставил бы ИИ или вписали руками (таблиц по умолчанию в коде нет). */
+const pairUp = (id = 'hybrid', rom = 'yes', extra = {}) => { st.md.brain.circle = ['Хеди', 'Баки']; st.md.brain.circleAuto = false; st.md.brain.pairs = [{ a: 'Хеди', b: 'Баки', id, rom, ...extra }]; };
 const three = () => { const out = []; for (let k = 0; k < 3; k++) { out.push(mod.prompt('normal')); next(); } return out; };
 const count = (rows, re) => rows.filter(x => re.test(x)).length;
 
@@ -1013,16 +1019,21 @@ test('0.8: как привязывается — у каждого свои сл
     st.md.brain.circle = [];
 });
 
-test('0.8: троп пары — сеется с кругом, виден в листе, под давлением показывает тёмную сторону', async () => {
-    delete st.md.brain.circle;
+test('0.8: троп пары — сам не появляется; заданный виден в листе, под давлением показывает тёмную сторону', async () => {
+    st.md.brain.circle = ['Хеди', 'Баки']; st.md.brain.circleAuto = false;
     delete st.md.brain.pairs;
     st.pins = {};
     await fresh(9200);
+    assert.deepEqual(st.md.brain.pairs, [], 'тропов по умолчанию нет: их расставляет ИИ или руки');
+    assert.match(st.shelf.tracker.html(), /<option value="" selected>троп не задан<\/option>/);
+    change({ bin: 'tr', who: B, to: 'Хеди Барлоу' }, 'hybrid', { tagName: 'SELECT' });
+    change({ bin: 'rom', who: B, to: 'Хеди Барлоу' }, 'yes', { tagName: 'SELECT' });
     const html = st.shelf.tracker.html();
     assert.match(html, /<option value="hybrid" selected>Доктор и Клара<\/option>/);
     assert.match(html, /<option value="yes" selected>романтика<\/option>/);
     assert.match(html, /Под давлением: вдвоём безрассуднее/);
-    assert.equal(st.md.brain.pairs.length, 9);
+    assert.match(html, /вписано руками — ИИ не тронет/);
+    assert.equal(st.md.brain.pairs.length, 1);
     assert.equal(brain.view(B).dear.trope, 'hybrid');
     const rows = three();
     assert.equal(count(rows, /с Хеди — равные, которые отражают друг друга[\s\S]*это любовь, и оба это знают/), 1, rows.join('\n'));
@@ -1035,10 +1046,10 @@ test('0.8: троп пары — сеется с кругом, виден в л�
     // правится в листе
     change({ bin: 'tr', who: B, to: 'Хеди Барлоу' }, 'kin', { tagName: 'SELECT' });
     change({ bin: 'rom', who: B, to: 'Хеди Барлоу' }, 'hint', { tagName: 'SELECT' });
-    assert.deepEqual(st.md.brain.pairs.find(x => x.a === 'Хеди' && x.b === 'Баки'), { a: 'Хеди', b: 'Баки', id: 'kin', rom: 'hint', her: true, hand: true });
+    assert.deepEqual(st.md.brain.pairs[0], { a: 'Баки Барнс', b: 'Хеди Барлоу', id: 'kin', rom: 'hint', hand: true });
     assert.match(mod.prompt('normal'), /с Хеди — родные, которые навёрстывают[\s\S]*вслух этого нет/);
     change({ bin: 'tr', who: B, to: 'Хеди Барлоу' }, '', { tagName: 'SELECT' });
-    assert.equal(st.md.brain.pairs.length, 8);
+    assert.equal(st.md.brain.pairs.length, 0);
     assert.ok(!/с Хеди —/.test(mod.prompt('normal')));
     st.md.brain.circle = [];
     st.md.brain.pairs = [];
@@ -1079,21 +1090,28 @@ test('0.8: стержень — в тихой сцене чем живёт, на
     for (const k of ['goal', 'need', 'view', 'fear']) sp(k, '');
 });
 
-test('0.8: известным — способ по умолчанию; сбор приносит стержень; у собранных раньше дособирается только новое', async () => {
+test('0.8: способа по умолчанию нет — его решает ИИ или руки; сбор приносит стержень; у собранных раньше дособирается только новое', async () => {
     const prof = () => st.ext.brain.prof[B];
-    Object.assign(prof(), { attach: '', reject: 1, booze: 1, seeded: undefined, v: 0 });
-    Object.assign(st.ext.brain.prof[N] || (st.ext.brain.prof[N] = {}), { attach: '', seeded: undefined });
+    Object.assign(prof(), { attach: '', reject: 1, booze: 1, seeded: undefined, styleBy: '', v: 0 });
+    Object.assign(st.ext.brain.prof[N] || (st.ext.brain.prof[N] = {}), { attach: '', seeded: undefined, styleBy: '' });
     await brain.ensure();
-    assert.equal(prof().attach, 'guard');
-    assert.equal(prof().reject, 1.4);
-    assert.equal(prof().booze, 2.5, 'суперсолдат: берёт хуже и отпускает быстрее, но берёт');
-    assert.equal(st.ext.brain.prof[N].attach, 'armor');
-    setStyle('fix');
-    await brain.ensure();
-    assert.equal(prof().attach, 'fix', 'поправленное руками по умолчанию не затирается');
-    // полный сбор
+    assert.equal(prof().attach, '', 'имён и таблиц по умолчанию в коде нет');
+    assert.equal(prof().reject, 1);
+    assert.equal(prof().booze, 1);
+    assert.equal(st.ext.brain.prof[N].attach, '');
+    // вписано руками — сбор поодиночке эту тройку не трогает
     st.depth = { attach: 'сторож', reject: 1.7, booze: 2, spine: { goal: 'искупить', need: 'поверить, что его можно любить', view: 'за всё платят', fear: 'снова стать оружием', face: 'надёжным' }, drunk: 'почти не пьянеет: только взгляд теплеет и плечи опускаются' };
-    Object.assign(prof(), { attach: '', seeded: undefined, v: 0, spine: {} });
+    setStyle('fix');
+    assert.equal(prof().styleBy, 'hand');
+    Object.assign(prof(), { v: 0 });
+    await click({ bact: 'collect', who: B });
+    assert.equal(prof().attach, 'fix', 'поправленное руками не затирается');
+    assert.equal(prof().reject, 1, 'и рана отвержения — тоже');
+    assert.match(st.shelf.tracker.html(), /вписано руками — ИИ не тронет/);
+    // «не задано» — выбор возвращён ИИ; полный сбор
+    setStyle('');
+    assert.equal(prof().styleBy, '');
+    Object.assign(prof(), { v: 0, spine: {} });
     await click({ bact: 'collect', who: B });
     assert.equal(prof().attach, 'guard', 'название способа читается');
     assert.equal(prof().reject, 1.7);
@@ -1125,8 +1143,7 @@ test('0.8: известным — способ по умолчанию; сбор
 // ───────────── 0.8.2: тихая минута; выпитое у персонажа игрока ─────────────
 
 test('0.8.2: подначки — не всегда: в тихую минуту у пары тишина, в игривую — подколки, в обычную модели не диктуем', async () => {
-    delete st.md.brain.circle;
-    delete st.md.brain.pairs;
+    pairUp();
     st.pins = {};
     setStyle('guard');
     // день, ровно: ядро тропа и обычная манера быть рядом
@@ -1221,7 +1238,6 @@ test('0.8.2: персонаж игрока — мозг считает толь�
 const eraWait = () => new Promise(r => setTimeout(r, 520));   // снимок эпохи мозг помнит полсекунды
 const pastEra = { context: () => ({ era: { id: 'past', from: '1943-10', to: '1945-03' } }) };
 const openEra = { context: () => ({ era: { id: 'now', from: '2024-01', to: null } }) };
-let seededPairs = [];
 
 test('0.8.3: в чате прошлой эпохи круг сам не заполняется и ничего не запирает; вписанное руками — остаётся', async () => {
     delete st.md.brain.circle; delete st.md.brain.circleAuto; delete st.md.brain.pairs; st.md.brain.circlePins = []; st.pins = {};
@@ -1247,27 +1263,67 @@ test('0.8.3: в чате прошлой эпохи круг сам не запо
     await eraWait();
 });
 
-test('0.8.3: в настоящем истории (открытая эпоха) круг заполняется, как раньше', async () => {
-    delete st.md.brain.circle; delete st.md.brain.circleAuto; st.md.brain.circlePins = []; st.pins = {};
+test('0.11: в настоящем истории круг сам тоже не заполняется; «намертво» из пары запирает в Life любовь и близость — в свою сторону', async () => {
+    delete st.md.brain.circle; delete st.md.brain.circleAuto; st.md.brain.circlePins = []; st.pins = {}; st.md.brain.pairs = [];
     globalThis.SacredTimeline = openEra;
     await eraWait();
     await fresh(6020);
     st.shelf.tracker.html();
-    assert.deepEqual(st.md.brain.circle, ['Хеди', 'Баки', 'Наташа', 'Тони', 'Елена']);
-    assert.equal(st.md.brain.circleAuto, true);
-    delete st.md.brain.pairs;
-    brain.view(B);
-    assert.ok(st.md.brain.pairs.length >= 2 && st.md.brain.pairs.some(x => x.a === 'Хеди' && x.b === 'Баки'), 'в настоящем тропы пар сеются вместе с кругом');
-    seededPairs = JSON.parse(JSON.stringify(st.md.brain.pairs));
+    assert.deepEqual(st.md.brain.circle, [], 'имён по умолчанию нет — и в настоящем');
+    assert.equal(st.md.brain.circleAuto, false);
+    assert.deepEqual(st.md.brain.pairs, []);
+    assert.deepEqual(st.pins, {});
+    // «он — намертво»: заперта только его сторона
+    change({ bin: 'own', who: B, to: 'Хеди Барлоу' }, 'a', { tagName: 'SELECT' });
+    assert.deepEqual(Object.keys(st.pins), ['баки>хеди']);
+    assert.deepEqual(st.pins['баки>хеди'], { love: 100, closeness: 100 });
+    assert.equal(brain.view(B).dear.cosmic, true);
+    assert.match(st.shelf.tracker.html(), /запирает в «Отношениях» Life любовь и близость на 100/);
+    // «оба» — обе стороны; «связь ещё складывается» — свои замки сняты
+    change({ bin: 'own', who: B, to: 'Хеди Барлоу' }, 'both', { tagName: 'SELECT' });
+    assert.deepEqual(Object.keys(st.pins).sort(), ['баки>хеди', 'хеди>баки']);
+    change({ bin: 'own', who: B, to: 'Хеди Барлоу' }, '', { tagName: 'SELECT' });
+    assert.deepEqual(st.pins, {}, 'сменила — замки сняты');
+    assert.deepEqual(st.md.brain.circlePins, []);
+    // замок, который она поставила сама, мозг не считает своим и не снимает
+    st.pins = { 'баки>хеди': { love: 100, closeness: 100 } };
+    change({ bin: 'own', who: B, to: 'Хеди Барлоу' }, 'a', { tagName: 'SELECT' });
+    change({ bin: 'own', who: B, to: 'Хеди Барлоу' }, '', { tagName: 'SELECT' });
+    assert.deepEqual(Object.keys(st.pins), ['баки>хеди']);
+    st.pins = {}; st.md.brain.pairs = [];
     delete globalThis.SacredTimeline;
     await eraWait();
 });
 
-test('0.8.3: круг заполнился сам, а ядро назвало прошлую эпоху позже — круг очищается, свои замки снимаются, чужие нет', async () => {
-    st.md.brain.circle = ['Хеди', 'Баки', 'Наташа', 'Тони', 'Елена']; st.md.brain.circleAuto = true;
+test('0.11: в чате прошлой эпохи «намертво» из пары живёт только в мозге — замков нет', async () => {
+    st.md.brain.circle = []; st.md.brain.circleAuto = false; st.md.brain.circlePins = []; st.pins = {}; st.md.brain.pairs = [];
+    globalThis.SacredTimeline = pastEra;
+    await eraWait();
+    await fresh(6030);
+    change({ bin: 'own', who: B, to: 'Хеди Барлоу' }, 'both', { tagName: 'SELECT' });
+    assert.deepEqual(st.pins, {});
+    assert.equal(brain.view(B).dear.cosmic, true, 'а привязанность — космическая');
+    assert.match(st.shelf.tracker.html(), /чат прошлой эпохи: «намертво» здесь живёт только в мозге/);
+    // расстановка была в настоящем, а ядро назвало прошлую эпоху позже — свои замки снимаются
+    delete globalThis.SacredTimeline;
+    await eraWait();
+    await brain.ensure();
+    assert.deepEqual(Object.keys(st.pins).sort(), ['баки>хеди', 'хеди>баки'], 'без эпохи — настоящее: заперто');
+    globalThis.SacredTimeline = pastEra;
+    await eraWait();
+    await brain.ensure();
+    assert.deepEqual(st.pins, {});
+    st.md.brain.pairs = [];
+    delete globalThis.SacredTimeline;
+    await eraWait();
+});
+
+test('0.8.3: круг заполнила сама старая версия, а ядро назвало прошлую эпоху позже — круг очищается, свои замки снимаются, чужие нет', async () => {
+    const seeded = () => [{ a: 'Хеди', b: 'Баки', id: 'hybrid', rom: 'yes', her: true }, { a: 'Хеди', b: 'Наташа', id: 'hybrid', rom: 'hint' }];   // так сеяли версии до 0.11
+    st.md.brain.circle = ['Хеди', 'Баки', 'Наташа']; st.md.brain.circleAuto = true;
     st.md.brain.circlePins = ['баки барнс>хеди барлоу'];
     st.pins = { 'баки>хеди': { love: 100, closeness: 100 }, 'хеди>баки': { love: 100, closeness: 100 } };   // вторую сторону заперла она сама
-    st.md.brain.pairs = JSON.parse(JSON.stringify(seededPairs));
+    st.md.brain.pairs = seeded();
     globalThis.SacredTimeline = pastEra;
     await eraWait();
     st.shelf.tracker.html();
@@ -1276,13 +1332,13 @@ test('0.8.3: круг заполнился сам, а ядро назвало п
     assert.deepEqual(st.md.brain.pairs, [], 'тропы, посеянные вместе с кругом, ушли с ним');
     assert.deepEqual(Object.keys(st.pins), ['хеди>баки'], 'снят только замок, который ставил мозг: «она уже любит, он только начинает»');
     // версия 0.7.0 замков не помнила: круг чистим, замки не трогаем, говорим об этом
-    st.md.brain.circle = ['Хеди', 'Баки', 'Наташа', 'Тони', 'Елена']; delete st.md.brain.circleAuto; delete st.md.brain.circlePins;
+    st.md.brain.circle = ['Хеди', 'Баки', 'Наташа']; delete st.md.brain.circleAuto; delete st.md.brain.circlePins;
     st.pins = { 'баки>хеди': { love: 100, closeness: 100 } };
-    st.md.brain.pairs = JSON.parse(JSON.stringify(seededPairs)); st.md.brain.pairs[0].rom = 'hint';   // троп правили руками
+    st.md.brain.pairs = seeded(); Object.assign(st.md.brain.pairs[0], { rom: 'hint', hand: true });   // троп правили руками
     const n = st.toasts.length;
     st.shelf.tracker.html();
     assert.deepEqual(st.md.brain.circle, []);
-    assert.equal(st.md.brain.pairs.length, seededPairs.length, 'тропы, которые правили руками, эпоха не трогает');
+    assert.equal(st.md.brain.pairs.length, 1, 'троп, который правили руками, эпоха не трогает');
     assert.deepEqual(Object.keys(st.pins), ['баки>хеди'], 'чужой или старый замок не снимается молча');
     assert.equal(st.toasts.length, n + 1);
     assert.match(st.toasts[n][1], /прошлой эпохи/);
@@ -1362,8 +1418,7 @@ test('0.9: преданность мешает возразить — у каж�
 });
 
 test('0.9: двое-зеркал — азарт своего человека заражает; у других пар — нет', async () => {
-    delete st.md.brain.circle;
-    delete st.md.brain.pairs;
+    pairUp();
     st.pins = {};
     await fresh(10200);
     next([{ who: 'Баки', by: 'Хеди', fun: 2, why: 'подбила прыгнуть с пирса первым' }]);
@@ -1457,28 +1512,58 @@ test('0.10: в чате прошлой эпохи у героя свой тем�
     change({ bin: 'sp', k: 'goal', who: B }, '', { tagName: 'TEXTAREA' });
 });
 
-test('0.10: связи расставляет ИИ — на дату чата, «намертво» в одну сторону; вписанное руками не трогает', async () => {
+/** Ответ на перепроверку «намертво» (второй запрос): по значению на каждое утверждение. */
+const verify = (ok) => (msgs) => (/перепроверяешь/.test(msgs?.[0]?.content || '') ? { ok } : null);
+
+test('0.11: расстановку делает ИИ — весь состав одним запросом, на дату чата; «намертво» в одну сторону и с фактом; вписанное руками не трогает', async () => {
     globalThis.SacredTimeline = pastEra;
     await eraWait();
     delete st.md.brain.circle; delete st.md.brain.circleAuto; delete st.md.brain.pairs; delete st.md.brain.bondsAt; delete st.md.brain.bondsTried;
+    delete st.md.brain.meTol; delete st.md.brain.meTolBy;
+    delete st.ext.brain.prof[`${B}@past`]; delete st.ext.brain.prof[`${N}@past`];
     st.pins = {};
     await fresh(11100);
-    assert.deepEqual(st.md.brain.pairs, [], 'в прошлой эпохе само ничего не сеется');
-    assert.match(st.shelf.tracker.html(), /Расставить связи по истории/);
+    assert.deepEqual(st.md.brain.pairs, [], 'само ничего не сеется');
+    assert.match(st.shelf.tracker.html(), /Расставить по истории/);
     const hadStory = st.story;
     st.story = st.story || { felt: [] };
+    const nowStyle = st.ext.brain.prof[B].attach;
     // у одного уже намертво, у другого только начинается
-    st.depth = { pairs: [{ a: 'Хеди Барлоу', b: 'Баки Барнс', trope: 'uneven', rom: 'hint', own: 'a', why: 'один знает другого давно, второй видит его впервые' }, { a: 'Баки Барнс', b: 'Наташа Романофф', trope: 'нет такого', rom: 'no', own: 'none' }, { a: 'Баки Барнс', b: 'Баки Барнс', trope: 'kin' }] };
+    st.depth = {
+        people: [{ name: 'Баки Барнс', attach: 'guard', reject: 1.5, booze: 3, why: 'любит делом и молчит' }, { name: 'Наташа Романофф', attach: 'armor', reject: 1.2, booze: 1.3, why: 'держит на длину руки' },
+            { name: 'Хеди Барлоу', attach: 'fuse', reject: 1.8, booze: 1.6, why: 'пьёт привычно' }, { name: 'Кто-то Чужой', attach: 'fix' }],
+        pairs: [{ a: 'Хеди Барлоу', b: 'Баки Барнс', trope: 'uneven', rom: 'hint', own: 'a', fact: 'вытащила его из-под завала', why: 'один знает другого давно, второй видит его впервые' },
+            { a: 'Баки Барнс', b: 'Наташа Романофф', trope: 'нет такого', rom: 'no', own: 'none' }, { a: 'Баки Барнс', b: 'Баки Барнс', trope: 'kin' },
+            { a: 'Хеди Барлоу', b: 'Наташа Романофф', trope: 'comrades', rom: 'no', own: 'both', fact: '', why: 'служат вместе' }],
+    };
+    st.route = verify([true]);
     const n = st.fill.length;
     await click({ bact: 'bonds-fill', who: B });
-    assert.equal(st.fill.length, n + 1);
-    assert.match(st.fill[n].messages[0].content, /uneven — один уже любит[\s\S]*Не завышай: «намертво»/);
+    assert.equal(st.fill.length, n + 2, 'расстановка и перепроверка «намертво»');
+    assert.match(st.fill[n].messages[0].content, /Смотри на всех героев сразу и сравнивай[\s\S]*Расставляй сравнением[\s\S]*uneven — один уже любит[\s\S]*Не завышай: «намертво»[\s\S]*назвать в fact/);
     assert.match(st.fill[n].messages[1].content, /Персонаж игрока: Хеди Барлоу[\s\S]*Время этого чата: эпоха «past»/);
-    assert.deepEqual(st.md.brain.pairs, [{ a: 'Хеди Барлоу', b: 'Баки Барнс', id: 'uneven', rom: 'hint', own: 'a', why: 'один знает другого давно, второй видит его впервые', by: 'ai' }]);
-    assert.deepEqual(st.pins, {}, 'замков в Life расстановка не ставит');
+    assert.match(st.fill[n + 1].messages[0].content, /Сомневаешься — false/);
+    assert.match(st.fill[n + 1].messages[1].content, /1\. Хеди Барлоу держится за Баки Барнс намертво\. Факт: вытащила его из-под завала/);
+    assert.ok(!/2\. /.test(st.fill[n + 1].messages[1].content.split('———')[0]), '«намертво» без названного факта на перепроверку не идёт');
+    assert.deepEqual(st.md.brain.pairs, [
+        { a: 'Хеди Барлоу', b: 'Баки Барнс', id: 'uneven', rom: 'hint', own: 'a', why: 'один знает другого давно, второй видит его впервые', fact: 'вытащила его из-под завала', by: 'ai' },
+        { a: 'Хеди Барлоу', b: 'Наташа Романофф', id: 'comrades', rom: 'no', own: '', why: 'служат вместе', fact: '', by: 'ai' },
+    ]);
+    assert.deepEqual(st.pins, {}, 'в чате прошлой эпохи замков в Life расстановка не ставит');
+    // люди: способ, рана, алкоголь — в темперамент этой эпохи; настоящее не тронуто
+    const pb = st.ext.brain.prof[`${B}@past`];
+    assert.deepEqual([pb.attach, pb.reject, pb.booze, pb.styleBy, pb.styleWhy], ['guard', 1.5, 3, 'ai', 'любит делом и молчит']);
+    assert.equal(st.ext.brain.prof[`${N}@past`].attach, 'armor');
+    assert.equal(st.ext.brain.prof[B].attach, nowStyle);
+    // персонажу игрока — только как берёт алкоголь, и своё на этот чат
+    assert.deepEqual([st.md.brain.meTol, st.md.brain.meTolBy], [1.6, 'ai']);
+    assert.ok(!Object.keys(st.ext.brain.prof).some(k => /^Хеди/.test(k)), 'темперамент персонажу игрока не заводится');
+    assert.match(st.toasts[st.toasts.length - 1][1], /Расставлено по истории: связей — 2, намертво — 1, способ привязываться — 2\./);
     let html = st.shelf.tracker.html();
     assert.match(html, /ИИ: один знает другого давно, второй видит его впервые/);
     assert.match(html, /<option value="a" selected>Хеди — намертво<\/option>/);
+    assert.match(html, /Привязывается: сторож[\s\S]*ИИ: любит делом и молчит/);
+    assert.match(html, /Сейчас — как решил ИИ при расстановке/);
     assert.equal(brain.view(B).dear, null, 'у него связь ещё складывается — она не «своя»');
     // он догнал: правим руками
     change({ bin: 'own', who: B, to: 'Хеди Барлоу' }, 'both', { tagName: 'SELECT' });
@@ -1486,57 +1571,120 @@ test('0.10: связи расставляет ИИ — на дату чата, �
     next([{ who: 'Баки', by: 'Хеди', blow: 3, why: 'сказала, что он ей в тягость' }]);
     assert.equal(st.md.brain.who[B].hurtBy.kind, 'stay');
     assert.match(st.shelf.tracker.html(), /вписано руками — ИИ не тронет/);
-    // ИИ расставляет заново — её правка остаётся, новые пары добавляются
-    st.depth = { pairs: [{ a: 'Хеди Барлоу', b: 'Баки Барнс', trope: 'spar', rom: 'no', own: 'none', why: 'другое мнение' }, { a: 'Баки Барнс', b: 'Наташа Романофф', trope: 'comrades', rom: 'no', own: 'none', why: 'служат вместе' }] };
+    // руками: способ и переносимость персоны — тоже её
+    setStyle('test');
+    change({ bin: 'me', k: 'booze' }, 2.2);
+    assert.deepEqual([st.md.brain.meTol, st.md.brain.meTolBy], [2.2, 'hand']);
+    // ИИ расставляет заново: её правки остаются, остальное он решает снова; перепроверка снимает одну сторону
+    st.depth = {
+        people: [{ name: 'Баки Барнс', attach: 'fix', reject: 0.9, booze: 1, why: 'мимо' }, { name: 'Наташа Романофф', attach: 'test', reject: 1.6, booze: 1.1, why: 'колет, проверяя' }, { name: 'Хеди Барлоу', booze: 0.7 }],
+        pairs: [{ a: 'Хеди Барлоу', b: 'Баки Барнс', trope: 'spar', rom: 'no', own: 'none', why: 'другое мнение' },
+            { a: 'Баки Барнс', b: 'Наташа Романофф', trope: 'comrades', rom: 'no', own: 'both', fact: 'вместе отработали одну смену', why: 'служат вместе' }],
+    };
+    st.route = verify([true, false]);
     await click({ bact: 'bonds-fill', who: B });
     assert.equal(st.md.brain.pairs.find(p => p.b === 'Баки Барнс' && p.a === 'Хеди Барлоу').id, 'uneven');
-    assert.equal(st.md.brain.pairs.find(p => p.id === 'comrades').by, 'ai');
-    assert.equal(st.md.brain.pairs.length, 2);
+    const com = st.md.brain.pairs.find(p => p.id === 'comrades');
+    assert.deepEqual([com.a, com.b, com.own, com.by], ['Баки Барнс', 'Наташа Романофф', 'a', 'ai'], 'вторая сторона перепроверку не прошла');
+    assert.match(st.toasts[st.toasts.length - 1][1], /Перепроверка сняла «намертво»: 1/);
+    assert.equal(st.md.brain.pairs.length, 2, 'прежняя пара от ИИ, которую он больше не назвал, ушла');
+    assert.equal(st.ext.brain.prof[`${B}@past`].attach, 'test', 'вписанный руками способ ИИ не трогает');
+    assert.deepEqual([st.ext.brain.prof[`${N}@past`].attach, st.ext.brain.prof[`${N}@past`].reject], ['test', 1.6], 'своё прежнее решение по кнопке ИИ пересматривает');
+    assert.equal(st.md.brain.meTol, 2.2);
+    // перепроверка не ответила — расстановка остаётся как есть
+    st.depth = { pairs: [{ a: 'Баки Барнс', b: 'Наташа Романофф', trope: 'comrades', rom: 'no', own: 'b', fact: 'она вытащила его из воды', why: 'служат вместе' }] };
+    st.route = (msgs) => { if (/перепроверяешь/.test(msgs?.[0]?.content || '')) throw new Error('сеть'); return null; };
+    await click({ bact: 'bonds-fill', who: B });
+    assert.equal(st.md.brain.pairs.find(p => p.id === 'comrades').own, 'b');
+    st.route = null;
     st.story = hadStory;
     st.depth = null;
+    setStyle('');
+    delete st.ext.brain.prof[`${B}@past`]; delete st.ext.brain.prof[`${N}@past`];
+    delete st.md.brain.meTol; delete st.md.brain.meTolBy;
     delete globalThis.SacredTimeline;
     await eraWait();
     st.md.brain.circle = []; st.md.brain.circleAuto = false; st.md.brain.pairs = [];
 });
 
-test('0.10: в чате, где связей ещё нет, ИИ расставляет их сам — один раз; в настоящем её тропы не трогает', async () => {
+test('0.11: в чате, где расстановки ещё не было, ИИ делает её сам — один раз; в настоящем «намертво» от ИИ запирает шкалы Life', async () => {
     globalThis.SacredTimeline = pastEra;
     await eraWait();
     delete st.md.brain.circle; delete st.md.brain.circleAuto; delete st.md.brain.pairs; delete st.md.brain.bondsAt; delete st.md.brain.bondsTried;
+    delete st.ext.brain.prof[`${B}@past`]; delete st.ext.brain.prof[`${N}@past`];
     st.pins = {};
     await fresh(11200);
     st.ext.brain.auto = true;
     st.ext.brain.tried = {};
-    st.depth = { pairs: [{ a: 'Хеди Барлоу', b: 'Баки Барнс', trope: 'uneven', rom: 'hint', own: 'a', why: 'по лорбуку' }] };
+    // сбор поодиночке (attach и reject на верхнем уровне) идёт следом и решение по составу не затирает
+    st.depth = { attach: 'guard', reject: 1.7, people: [{ name: 'Баки Барнс', attach: 'serve', reject: 1.3, booze: 1, why: 'закрывает собой' }], pairs: [{ a: 'Хеди Барлоу', b: 'Баки Барнс', trope: 'uneven', rom: 'hint', own: 'none', why: 'по лорбуку' }] };
     await brain.ensure();
     assert.equal(st.md.brain.pairs.length, 1);
     assert.equal(st.md.brain.pairs[0].by, 'ai');
-    assert.match(st.toasts[st.toasts.length - 1][1], /Связи расставлены по истории: 1/);
+    assert.ok(st.toasts.some(t => /Расставлено по истории: связей — 1, способ привязываться — 1\./.test(t[1])), JSON.stringify(st.toasts.slice(-3)));
+    const pb = st.ext.brain.prof[`${B}@past`];
+    assert.equal(pb.src, 'lore', 'заодно собран темперамент этой эпохи — по её карточке');
+    assert.deepEqual([pb.attach, pb.reject, pb.styleBy], ['serve', 1.3, 'ai']);
+    assert.equal(st.ext.brain.prof[`${N}@past`].attach, 'guard', 'кого состав не назвал — тому способ даёт сбор поодиночке');
     const asked = st.asked;
     await brain.ensure();
     assert.equal(st.asked, asked, 'второй раз сам не спрашивает');
-    assert.equal(st.ext.brain.prof[`${B}@past`].src, 'lore', 'заодно собран темперамент этой эпохи — по её карточке');
     delete st.ext.brain.prof[`${B}@past`]; delete st.ext.brain.prof[`${N}@past`];
     delete globalThis.SacredTimeline;
     await eraWait();
-    // настоящее: тропы по умолчанию на месте, сам ИИ не запускается; по кнопке — её три не трогает, остальное уточняет
+    // настоящее: таблиц нет — расставляет тоже ИИ, и его «намертво» (после перепроверки) запирает любовь и близость
     delete st.md.brain.circle; delete st.md.brain.circleAuto; delete st.md.brain.pairs; delete st.md.brain.bondsAt; delete st.md.brain.bondsTried;
+    st.md.brain.circlePins = [];
     await fresh(11300);
-    assert.equal(st.md.brain.pairs.length, 9);
-    const before = st.asked;
+    assert.deepEqual(st.md.brain.pairs, []);
+    st.depth = { pairs: [{ a: 'Хеди Барлоу', b: 'Баки Барнс', trope: 'hybrid', rom: 'yes', own: 'both', fact: 'вместе пережили обвал и зиму в горах', why: 'равные, которые отражают друг друга' },
+        { a: 'Баки Барнс', b: 'Наташа Романофф', trope: 'comrades', rom: 'no', own: 'both', fact: 'работали в одной смене', why: 'служат вместе' }] };
+    st.route = verify([true, true, false, false]);
     await brain.ensure();
-    assert.equal(st.md.brain.pairs.length, 9);
-    assert.equal(st.md.brain.bondsAt, undefined, 'там, где связи уже есть, сам не лезет');
+    assert.deepEqual(Object.keys(st.pins).sort(), ['баки>хеди', 'хеди>баки']);
+    assert.ok(st.toasts.some(t => /намертво — 1 \(любовь и близость заперты на 100\)/.test(t[1])));
+    assert.equal(st.md.brain.pairs.find(p => p.id === 'comrades').own, '', 'служба — не «намертво»: перепроверка сняла');
+    const again = st.asked;
+    await brain.ensure();
+    assert.equal(st.asked, again, 'там, где расстановка уже есть, сам не лезет');
+    // её правка: по кнопке ИИ эту пару не трогает, остальное уточняет
+    change({ bin: 'rom', who: B, to: 'Хеди Барлоу' }, 'hint', { tagName: 'SELECT' });
     st.depth = { pairs: [{ a: 'Хеди Барлоу', b: 'Баки Барнс', trope: 'spar', rom: 'no', own: 'none', why: 'мимо' }, { a: 'Баки Барнс', b: 'Наташа Романофф', trope: 'sisters', rom: 'no', own: 'none', why: 'прошли одно и то же' }] };
+    st.route = null;
     await click({ bact: 'bonds-fill', who: B });
-    const hb = st.md.brain.pairs.find(p => p.a === 'Хеди' && p.b === 'Баки');
-    assert.equal(hb.id, 'hybrid', 'названное ею ИИ не меняет');
+    const hb = st.md.brain.pairs.find(p => p.a === 'Хеди Барлоу' && p.b === 'Баки Барнс');
+    assert.deepEqual([hb.id, hb.rom, hb.own], ['hybrid', 'hint', 'both'], 'вписанное руками ИИ не меняет');
     assert.equal(st.md.brain.pairs.find(p => p.id === 'sisters' && p.by === 'ai').why, 'прошли одно и то же');
-    assert.equal(st.md.brain.pairs.length, 9, 'троп по умолчанию заменён, а не продублирован');
+    assert.equal(st.md.brain.pairs.length, 2, 'прежняя пара заменена, а не продублирована');
+    assert.deepEqual(Object.keys(st.pins).sort(), ['баки>хеди', 'хеди>баки'], 'замки её пары на месте');
     st.ext.brain.auto = false;
     st.depth = null;
-    st.md.brain.circle = []; st.md.brain.circleAuto = false; st.md.brain.pairs = []; st.pins = {};
-    assert.ok(before >= 0);
+    st.md.brain.circle = []; st.md.brain.circleAuto = false; st.md.brain.pairs = []; st.pins = {}; st.md.brain.circlePins = [];
+});
+
+test('0.11: без свода большие заполнения идут умной моделью Life; заметки автора уходят ИИ; видно, чья модель решает', async () => {
+    const hadStory = st.story;
+    st.story = null;
+    change({ bin: 'note', k: 'aiNote' }, 'Эта пара живёт по сценарию двух зеркал.', { tagName: 'TEXTAREA' });
+    assert.equal(st.ext.brain.aiNote, 'Эта пара живёт по сценарию двух зеркал.');
+    let n = st.deep.length;
+    await click({ bact: 'collect', who: B });
+    assert.equal(st.deep.length, n + 1, 'сбор темперамента — умной моделью');
+    assert.match(st.deep[n].messages[1].content, /Заметки автора истории[\s\S]*по сценарию двух зеркал/);
+    n = st.deep.length;
+    st.depth = { pairs: [] };
+    await click({ bact: 'bonds-fill', who: B });
+    assert.equal(st.deep.length, n + 1, 'расстановка — тоже; перепроверять нечего');
+    assert.match(st.deep[n].messages[1].content, /Заметки автора истории/);
+    assert.match(st.shelf.tracker.html(), /Умная модель в Life не выбрана — решает модель Летописца/);
+    const was = api.settings;
+    api.settings = () => ({ enabled: true, chron: { deepModel: 'умная-1' } });
+    assert.match(st.shelf.tracker.html(), /Решает умная модель Life — умная-1\./);
+    api.settings = was;
+    change({ bin: 'note', k: 'aiNote' }, '', { tagName: 'TEXTAREA' });
+    st.depth = null;
+    st.story = hadStory;
+    st.md.brain.pairs = [];
 });
 
 test('0.10: инициатива растёт из того, чего человек добивается', async () => {

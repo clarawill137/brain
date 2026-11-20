@@ -13,7 +13,7 @@ import { SOFT, tie, pairStats, lens, haven, afterHurt, stayStyle, grudgeDecay } 
 import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, ROM_NAME, tropeLine, tropeMul, ownSide, rejectOf, SPINE_KEYS, SPINE_NAME, hasSpine, spineLine } from './core/attach.js';
 import { STAGE_NAME, stageOf, tolOf, drink, sober, boozeNow, DRUNK, HUNG, SEEN, SEEN_HUNG, playerTips } from './core/booze.js';
 
-const VERSION = '0.10.0';
+const VERSION = '0.11.0';
 const ID = 'brain';
 const TITLE = '🧠 Мозг';
 const NARR = /рассказчик|narrator|мастер|game ?master|(^|[^a-z])gm([^a-z]|$)|мнемозина/i;
@@ -41,12 +41,6 @@ const SEQ_TEXT = [
     'после сильного — развилка: хорошего выхода нет, пусть мечется между двумя плохими и ещё не выбирает',
     'после сильного — решение: сам выбирает, что делать дальше, и делает первый шаг — по этому выбору и видно, кто он',
 ];
-// «свои» по умолчанию: у этих пятерых привязанность космическая (поправляется в листе, хранится в чате)
-const SEED_CIRCLE = ['Хеди', 'Баки', 'Наташа', 'Тони', 'Елена'];
-// как привязывается каждый из известных (предложение по умолчанию — правится в листе): способ, рана отвержения, как берёт алкоголь
-const SEED_TEMPER = { 'Баки': { attach: 'guard', reject: 1.4, booze: 2.5 }, 'Наташа': { attach: 'armor', reject: 1.5 }, 'Тони': { attach: 'fix', reject: 1.2, booze: 1.4 }, 'Елена': { attach: 'test', reject: 1.5, booze: 1.3 }, 'Питер': { attach: 'serve', reject: 1.3, booze: 0.8 } };
-// тропы пар по умолчанию: [кто, с кем, троп, романтика]
-const SEED_PAIRS = [['Хеди', 'Баки', 'hybrid', 'yes', 1], ['Хеди', 'Наташа', 'hybrid', 'hint', 1], ['Хеди', 'Тони', 'kin', 'no', 1], ['Хеди', 'Елена', 'sisters', 'no'], ['Наташа', 'Елена', 'sisters', 'no'], ['Баки', 'Тони', 'truce', 'no'], ['Баки', 'Наташа', 'comrades', 'no'], ['Тони', 'Наташа', 'comrades', 'no'], ['Хеди', 'Питер', 'sibling', 'no']];
 const TEMPER_V = 8;      // с какой версии в темпераменте есть способ привязываться, стержень и алкоголь
 const PAIR_STAT = [['blur', 'Прощает'], ['haven', 'Гавань'], ['fuse', 'Ревность наготове'], ['dread', 'Страх потерять']];
 const INIT_NAME = { care: 'забота', court: 'ухаживание', flirt: 'флирт', touch: 'касание', spicy: 'откровенность', gift: 'подарок', own: 'своё дело', talk: 'разговор', plot: 'затея' };
@@ -131,12 +125,13 @@ function whenLine() {
     if (day) bits.push(`дата в истории — ${day}`);
     return bits.length ? `Время этого чата: ${bits.join('; ')}. Суди на эту дату: того, что случится позже, герои ещё не пережили и друг о друге ещё не знают — будущее сюда не переноси.` : '';
 }
-const sameList = (a, b) => a.length === b.length && a.every((x, k) => x === b[k]);
 const nm = (v) => (A.norm ? A.norm(A.canonName(v)) : String(A.canonName(v) ?? '').toLowerCase().replace(/ё/g, 'е').trim());
 const dirKey = (a, b) => `${nm(a)}>${nm(b)}`;   // как у Life (dirKey в index.js)
-/** Снять свои замки (любовь и близость по сто), которые syncCircle поставил в этом чате. */
-function unpinOwn(m) {
-    for (const k of Array.isArray(m.circlePins) ? m.circlePins : []) {
+/** Снять свои замки (любовь и близость по сто) — те, что мозг сам поставил в этом чате: все или названные. */
+function unpinOwn(m, only = null) {
+    const all = Array.isArray(m.circlePins) ? m.circlePins : [];
+    const drop = only ? all.filter(k => only.includes(k)) : all;
+    for (const k of drop) {
         const [a, b] = String(k).split('>');
         if (!a || !b) continue;
         safe(() => {
@@ -151,31 +146,25 @@ function unpinOwn(m) {
             return true;
         });
     }
-    m.circlePins = [];
+    m.circlePins = all.filter(k => !drop.includes(k));
 }
 
 /**
  * Круг «своих» этого чата: между ними привязанность космическая — что бы ни случилось, она не меняется.
- * Первый раз заполняется сам, если в чате есть хотя бы двое из известной пятёрки, — но только в настоящем истории:
- * в чате прошлой эпохи круг сам не заполняется и ничего не запирает (впиши руками, если там уже так; одностороннее
- * «она любит, он только начинает» — замком шкалы на одну сторону в Life). Дальше — как поправишь.
+ * Сам круг не заполняется: кто к кому привязан намертво, решает ИИ по истории (пары в «К кому как») или ты — там же
+ * или здесь, списком. Круг, который до 0.11 заполняла сама программа, был про настоящее: в чате прошлой эпохи он снимается.
  */
 function circle() {
     const m = M();
-    if (!Array.isArray(m.circle)) {
-        const cast = [user(), ...safe(() => A.groupMembers().map(A.canonName), [])].filter(Boolean);
-        const seed = !pastEra() && SEED_CIRCLE.filter(n => cast.some(c => A.sameName(c, n))).length >= 2;
-        m.circle = seed ? [...SEED_CIRCLE] : [];
-        m.circleAuto = seed;
-    }
-    // ядро назвало эпоху позже, чем круг заполнился сам (или его заполнила версия 0.7.0, не знавшая про эпохи)
-    if (m.circle.length && pastEra() && (m.circleAuto === true || (m.circleAuto === undefined && sameList(m.circle, SEED_CIRCLE)))) {
+    if (!Array.isArray(m.circle)) { m.circle = []; m.circleAuto = false; }
+    // ядро назвало эпоху позже, чем круг заполнился сам (или его заполнила версия, не знавшая про эпохи)
+    if (m.circle.length && pastEra() && m.circleAuto !== false) {
         const legacy = m.circleAuto === undefined;
         unpinOwn(m);
         m.circle = [];
         m.circleAuto = false;
-        // тропы пар сеялись вместе с кругом: нетронутые — убрать (они про настоящее), правленые руками — оставить
-        if (Array.isArray(m.pairs) && m.pairs.length === SEED_PAIRS.length && m.pairs.every((x, k) => x && x.a === SEED_PAIRS[k][0] && x.b === SEED_PAIRS[k][1] && x.id === SEED_PAIRS[k][2] && x.rom === SEED_PAIRS[k][3])) m.pairs = [];
+        // тропы сеялись вместе с кругом и тоже были про настоящее: посеянные — убрать, вписанные руками и расставленные ИИ — оставить
+        if (Array.isArray(m.pairs)) m.pairs = m.pairs.filter(p => p && (p.hand || p.by === 'ai'));
         relCache.clear();
         saveM(); safe(() => A.saveMeta?.()); safe(() => A.updatePrompt());
         // старая версия своих замков не помнила: снять их за неё нельзя — можно задеть поставленные руками
@@ -184,30 +173,53 @@ function circle() {
     return m.circle;
 }
 const inCircle = (n) => !!n && circle().some(x => A.sameName(x, n));
-/** В Life «свои» получают любовь и близость по сто под замком — в обе стороны (только те, кто есть в этом чате). */
-function syncCircle() {
+/**
+ * Кому в «Отношениях» Life положены любовь и близость по сто под замком: «своим» из круга — друг к другу, а в
+ * настоящем истории ещё и тем, кто привязан намертво (пара в «К кому как»), — в ту сторону, в какую привязан.
+ * В чате прошлой эпохи «намертво» из пары живёт только в мозге: там отношения ещё складываются, шкалы должны ходить.
+ */
+function wantPins() {
+    const out = new Map();
+    const cast = [user(), ...safe(() => A.groupMembers().map(A.canonName), [])].filter(n => n && !NARR.test(n));
+    const here = (n) => cast.find(c => A.sameName(c, n)) || '';
+    const add = (a, b) => { if (a && b && !A.sameName(a, b)) out.set(dirKey(a, b), [a, b]); };
+    const own = cast.filter(inCircle);
+    for (const a of own) for (const b of own) add(a, b);
+    if (!pastEra() && mech('style')) {
+        for (const p of pairs()) {
+            const a = here(p.a), b = here(p.b);
+            if (p.own === 'a' || p.own === 'both') add(a, b);
+            if (p.own === 'b' || p.own === 'both') add(b, a);
+        }
+    }
+    return out;
+}
+/** Привести замки Life к расстановке: поставить недостающие, свои лишние — снять. Возвращает, сколько поставлено. */
+function syncPins() {
     if (!A.relPin) return 0;
     const m = M();
-    const cast = [user(), ...safe(() => A.groupMembers().map(A.canonName), [])].filter(n => n && !NARR.test(n) && inCircle(n));
+    const want = wantPins();
+    const had = Array.isArray(m.circlePins) ? m.circlePins : [];
+    const gone = had.filter(k => !want.has(k));
+    if (gone.length) unpinOwn(m, gone);
     let n = 0;
-    for (const a of cast) for (const b of cast) {
-        if (A.sameName(a, b) || !safe(() => A.relPin(a, b, { love: 100, closeness: 100 }), false)) continue;
+    for (const [k, [a, b]] of want) {
+        if (!safe(() => A.relPin(a, b, { love: 100, closeness: 100 }), false)) continue;
         n++;
-        const k = dirKey(a, b);
         if (!Array.isArray(m.circlePins)) m.circlePins = [];
         if (!m.circlePins.includes(k)) m.circlePins.push(k);
     }
-    if (n) { relCache.clear(); saveM(); safe(() => A.saveMeta?.()); safe(() => A.updatePrompt()); }
+    if (n || gone.length) { relCache.clear(); saveM(); safe(() => A.saveMeta?.()); safe(() => A.updatePrompt()); }
     return n;
 }
 
 /**
- * Тропы пар этого чата: [{ a, b, id, rom }] — по какому сценарию двое существуют вместе. Сеются вместе с кругом «своих».
+ * Пары этого чата: [{ a, b, id, rom, own, why, by, hand }] — по какому сценарию двое существуют вместе и кто к кому
+ * привязан намертво. Расставляет ИИ по истории (fillCast) или ты руками; сами по себе не появляются.
  */
 function pairs() {
     const m = M();
-    // в чате прошлой эпохи тропы сами не сеются: там эти двое могли ещё и не встретиться
-    if (!Array.isArray(m.pairs)) m.pairs = circle().length && !pastEra() ? SEED_PAIRS.map(([a, b, id, rom, her]) => (her ? { a, b, id, rom, her: true } : { a, b, id, rom })) : [];
+    if (!Array.isArray(m.pairs)) m.pairs = [];
     return m.pairs;
 }
 const pairOf = (a, b) => (a && b ? pairs().find(p => (A.sameName(p.a, a) && A.sameName(p.b, b)) || (A.sameName(p.a, b) && A.sameName(p.b, a))) || null : null);
@@ -222,7 +234,7 @@ function setPair(a, b, patch) {
     saveM();
 }
 // ───────────── персонаж игрока: мозг его не ведёт — только считает выпитое ─────────────
-const meTol = () => P.clamp(cfg().meBooze ?? 1, 0.4, 6);
+const meTol = () => P.clamp(M().meTol ?? cfg().meBooze ?? 1, 0.4, 6);
 function meLive() {
     const m = M();
     if (!m.me || typeof m.me !== 'object') m.me = { bac: 0, bacPeak: 0, hung: null, blank: false, drankAt: null, at: null };
@@ -274,23 +286,6 @@ function meLine(here) {
     return `[${U}, персонаж игрока, — ${what} (считает Life по выпитому в истории). Что ${U} делает, говорит и чувствует — решает игрок, за игрока не пиши; остальные это замечают и откликаются каждый по-своему.]`;
 }
 
-/** Известным персонажам — способ привязываться по умолчанию (один раз; дальше — как поправишь). */
-function seedTemper(who) {
-    // способы по умолчанию — про героев настоящего; в прошлой эпохе способ выбирает ИИ по её карточке и лорбуку
-    if (pastEra()) return;
-    const k = keyOf(who);
-    const raw = cfg().prof[k];
-    if (raw?.seeded) return;
-    const hit = Object.entries(SEED_TEMPER).find(([n]) => A.sameName(n, who));
-    if (!hit) return;
-    editTemper(who, (t) => {
-        if (!t.attach) t.attach = hit[1].attach;
-        if (t.reject === 1 && hit[1].reject) t.reject = hit[1].reject;
-        if (t.booze === 1 && hit[1].booze) t.booze = hit[1].booze;
-        t.seeded = TEMPER_V;
-    });
-}
-
 const lifeOn = () => { try { return A.settings().enabled !== false; } catch { return true; } };
 const on = () => !!A && !!A.hasChat?.() && lifeOn() && cfg().on !== false;
 const mech = (k) => cfg().mech[k] !== false;
@@ -312,7 +307,7 @@ function rawTemper(who) {
     if (c.prof[k]) return c.prof[k];
     const b = baseKey(who);
     if (k === b || !c.prof[b]) return undefined;
-    const { attach, reject, spine, beliefs, dates, fix, seeded, story, note, ...rest } = c.prof[b];
+    const { attach, reject, spine, beliefs, dates, fix, seeded, styleBy, styleWhy, story, note, ...rest } = c.prof[b];
     return { ...rest, src: 'auto', v: 0 };
 }
 const temperOf = (who) => P.normTemper(rawTemper(who));
@@ -1214,8 +1209,10 @@ cass — кассеты: КАК ИМЕННО ОН ведёт себя на ка�
 fix — 3–6 вещей, которые возвращают его в себя, когда плохо (по 1–4 слова, из лорбука: голос близкого, счёт вслух, дело для рук, холодная вода…). beliefs — 1–3 глубинных убеждения о себе, с которыми он живёт и которые мешают принимать хорошее: t — его словами, 2–6 слов («я испорченный»); truth — что станет его правдой, если убеждение сломается, 3–10 слов. dates — дни в году, которые он помнит телом (годовщина гибели, день, когда всё сломалось): md — месяц и день «ММ-ДД», t — что это за день, 2–6 слов, kind — loss (утрата) или blow (вина, стыд). Только если в записях есть точные день и месяц; не выдумывай — иначе [].
 want — насколько ему нужна каждая потребность, от 0.6 до 1.5 (1 — как всем): bond — близость и прикосновения; safe — безопасность и контроль над обстановкой; free — свобода решать самому; need — быть нужным и полезным; quiet — тишина и покой от людей (выше у замкнутых); novel — новизна и движение (выше у тех, кому скучно в покое).`;
 
+const ATTACH_LIST = 'fuse — намертво: залипает целиком, свой человек становится центром, без него не живёт, а пережидает; guard — сторож: любит охраной и делом, о чувствах молчит, считает, что такого не заслуживает; armor — в броне: держит на длину руки шуткой и делом, но замечает всё и приходит первым; fix — чинит: любит через решения, подарки и контроль обстановки, двигатель — вина; test — проверяет: колет и дразнит, проверяя, останутся ли, страх выдаёт за злость; serve — жертвует собой: ставит себя между своим и бедой, свои нужды не считает; secure — спокойно и ровно, без надрыва (редкость у травмированных)';
+
 const DEPTH_RULE = `
-attach — КАК он привязывается к своим людям (одно слово из списка): fuse — намертво: залипает целиком, свой человек становится центром, без него не живёт, а пережидает; guard — сторож: любит охраной и делом, о чувствах молчит, считает, что такого не заслуживает; armor — в броне: держит на длину руки шуткой и делом, но замечает всё и приходит первым; fix — чинит: любит через решения, подарки и контроль обстановки, двигатель — вина; test — проверяет: колет и дразнит, проверяя, останутся ли, страх выдаёт за злость; serve — жертвует собой: ставит себя между своим и бедой, свои нужды не считает; secure — спокойно и ровно, без надрыва (редкость у травмированных). reject — рана отвержения: насколько он заранее ждёт, что его бросят или предадут, от 0.6 до 1.8 (1 — как все; 1.4 и выше — у брошенных, преданных, выращенных как оружие). booze — как его берёт алкоголь: 0.6 — пьянеет с бокала, 1 — как всех, 1.5 — привычный, 3–5 — сверхчеловеческий обмен (суперсолдат): почти не берёт.
+attach — КАК он привязывается к своим людям (одно слово из списка): ${ATTACH_LIST}. reject — рана отвержения: насколько он заранее ждёт, что его бросят или предадут, от 0.6 до 1.8 (1 — как все; 1.4 и выше — у брошенных, преданных, выращенных как оружие). booze — как его берёт алкоголь: 0.6 — пьянеет с бокала, 1 — как всех, 1.5 — привычный, 3–5 — сверхчеловеческий обмен (суперсолдат): почти не берёт.
 spine — стержень, каждое поле его голосом и из его истории, а не общими словами: goal — чего он добивается всей своей жизнью ПО ЕГО МНЕНИЮ (4–12 слов); need — что ему нужно НА САМОМ ДЕЛЕ и чего он сам не видит (4–12 слов; с goal не совпадает и часто ему противоречит: goal обычно растёт из его убеждения о себе — он думает, что это его вылечит, — а need — правда, которая это убеждение отменяет); view — как, по его мнению, устроены мир и люди (одна фраза); fear — чего он боится больше всего (3–8 слов); face — каким хочет выглядеть в чужих глазах (3–8 слов).
 drunk — какой он пьяный, 10–28 слов: что делает, как говорит, куда его несёт (если его почти не берёт — так и напиши); hung — какой он с похмелья, 8–20 слов.`;
 
@@ -1224,6 +1221,13 @@ const DEPTH_SYS = `Ты дополняешь «код-мозг» персона�
 
 const STORY_RULE = `
 Тебе дан «Свод всей истории» — что с ним было и как он себя вёл на самом деле. Он важнее общих слов карточки: кассеты пиши с его настоящих жестов и фраз из истории; fix — то, что его на деле успокаивало; beliefs — то, что он о себе говорил и чем жил; sens и base — по тому, что его по-настоящему ранило и каким он был в спокойные дни, а не в последней сцене; dates — и дни из самой истории, которые он будет помнить телом (утрата, день, когда чуть не потерял близкого). Разовое состояние последних дней за характер не принимай.`;
+
+/** Заметки автора для ИИ (настройки мозга): то, чего нет в карточках и лорбуках, или что важнее их. */
+const noteLine = () => { const t = str(cfg().aiNote, 1500); return t ? `Заметки автора истории (они важнее карточек и лорбука — расставляй с их учётом):\n${t}` : ''; };
+/** Чьим умом идут большие разовые заполнения: умная модель Life (Мир → ⚙); пусто — она не выбрана и отвечает модель Летописца. */
+const smartName = () => { const ch = safe(() => A.settings().chron, null) || {}; return str(ch.deepModel || ch.deepProfile || '', 60); };
+/** Разовое заполнение без свода истории — тоже умной моделью (Life сам уйдёт к Летописцу, если умная не задана). */
+const askSmart = (msgs, tokens, check) => (A.askDeepJson || A.askJson)(msgs, tokens, check);
 
 /** Всё, что известно о человеке вне чата: ядро характера, карточка, лорбук — одним текстом для сбора. */
 async function sourcesOf(name) {
@@ -1239,8 +1243,10 @@ async function sourcesOf(name) {
 /** Способ привязываться, рана отвержения, алкоголь, стержень — из ответа модели в темперамент. Заданное раньше не затирается. */
 function applyDepth(x, j) {
     const id = styleId(j?.attach);
+    // эту тройку решает расстановка по всему составу (fillCast) или ты руками; поодиночке — только пока никто не решал
+    const free = !x.styleBy && !x.seeded;
     if (!x.attach && id) x.attach = id;
-    if (!x.seeded && num(x.v) < TEMPER_V) {
+    if (free && num(x.v) < TEMPER_V) {
         if (Number.isFinite(+j?.reject)) x.reject = P.clamp(j.reject, 0.6, 1.8);
         if (Number.isFinite(+j?.booze)) x.booze = P.clamp(j.booze, 0.5, 5);
     }
@@ -1252,29 +1258,40 @@ function applyDepth(x, j) {
 /** Дособрать только новое (способ привязываться, стержень, алкоголь) — у тех, чей темперамент собран раньше. Остального не трогает. */
 async function topUp(who) {
     const name = A.canonName(who);
-    const usr = await sourcesOf(name);
+    const usr = [await sourcesOf(name), noteLine()].filter(Boolean).join('\n\n');
     const whole = safe(() => !!A.story?.ready(), false);
     const check = { check: (x) => !!x && typeof x === 'object' && (!!x.spine || !!x.attach), what: 'Стержень' };
     const msgs = [{ role: 'system', content: DEPTH_SYS + (whole ? '\nТебе дан «Свод всей истории»: он важнее общих слов карточки — стержень и манеру бери из того, что он на деле делал и говорил.' : '') }, { role: 'user', content: usr }];
-    const j = whole && A.askFillJson ? await A.askFillJson(msgs, 1800, check, { who: name, max: 14000 }) : await A.askJson(msgs, 1000, check);
+    const j = whole && A.askFillJson ? await A.askFillJson(msgs, 1800, check, { who: name, max: 14000 }) : await askSmart(msgs, 1000, check);
     editTemper(name, (x) => applyDepth(x, j));
     return temperOf(name);
 }
 
-const BONDS_SYS = () => `Ты расставляешь связи между героями ролевой истории для «код-мозга». По карточкам, лорбукам (и своду всей истории, если он дан) определи, что между ними на ту дату, в которой идёт этот чат. Ответь только одним JSON по-русски:
-{"pairs":[{"a":"имя","b":"имя","trope":"hybrid","rom":"no","own":"none","why":"почему так, 5–14 слов"}]}
+const CAST_SYS = () => `Ты расставляешь для «код-мозга» ролевой истории две вещи: КАК каждый герой привязывается к своим людям и ЧТО между героями — на ту дату, в которой идёт этот чат. Суди по карточкам, лорбукам (и своду всей истории, если он дан). Ответь только одним JSON по-русски:
+{"people":[{"name":"имя","attach":"guard","reject":1,"booze":1,"why":"почему так, 5–14 слов"}],"pairs":[{"a":"имя","b":"имя","trope":"hybrid","rom":"no","own":"none","fact":"","why":"почему так, 5–14 слов"}]}
+people — все герои из списка. У персонажа игрока нужен только booze: способ привязываться и чувства там решает игрок — attach и reject не ставь.
+attach — способ привязываться к своим (одно слово из списка): ${ATTACH_LIST}.
+Смотри на всех героев сразу и сравнивай их между собой: способ у каждого свой. Выбирай то, чем человек отличается от остальных, а не самое общее для травмированных; одинаковый способ у двоих допустим, только если эти двое и правда привязываются одинаково.
+reject — рана отвержения: насколько человек заранее ждёт, что его бросят или предадут, от 0.6 до 1.8 (1 — как все). Расставляй сравнением: сначала реши, у кого из героев она глубже всех и у кого её почти нет, потом остальных — между ними. Тяжёлое прошлое само по себе ещё не рана отвержения: она у тех, кого бросали, предавали, растили как вещь.
+booze — как человека берёт алкоголь: 0.6 — пьянеет с бокала, 1 — как всех, 1.5 — привычка, 3–5 — сверхчеловеческий обмен: почти не берёт. Тоже сравнением.
+pairs — что между двумя героями.
 trope — по какому сценарию эти двое существуют вместе (одно слово из списка):
 ${TROPE_IDS.map(k => `${k} — ${TROPES[k].name}: ${TROPES[k].dyn}`).join('\n')}
 rom — yes: это любовь, и оба это знают; hint: больше, чем дружба, но вслух этого нет; no — романтики нет.
-own — кто к кому УЖЕ привязан намертво (что бы ни случилось, не отвернётся и простит что угодно): "a" — только первый ко второму, "b" — только второй к первому, "both" — оба, "none" — обычная связь, которая ещё складывается. Не завышай: «намертво» — это годы и общая беда за плечами, а не симпатия и не первая влюблённость.
-Пары: каждый персонаж с персонажем игрока и персонажи между собой — только там, где между ними на эту дату действительно что-то есть. Не знакомы, едва знакомы или друг другу никто — пару пропусти. Имена пиши ровно так, как они даны. Не больше шестнадцати пар.`;
+own — кто к кому УЖЕ привязан намертво (что бы ни случилось, не отвернётся и простит что угодно): "a" — только первый ко второму, "b" — только второй к первому, "both" — оба, "none" — обычная связь, которая ещё складывается. Не завышай: «намертво» — это годы и общая беда за плечами, а не симпатия, не долг службы и не первая влюблённость. Ставь его, только если можешь назвать в fact, что эти двое на эту дату уже пережили вместе (что случилось — одной фразой, из данных тебе текстов); назвать нечего — "none" и пустой fact.
+Пары: каждый герой с персонажем игрока и герои между собой — только там, где между ними на эту дату действительно что-то есть. Не знакомы, едва знакомы или друг другу никто — пару пропусти. Имена пиши ровно так, как они даны. Не больше шестнадцати пар.`;
+
+const OWN_CHECK_SYS = `Ты перепроверяешь чужую расстановку для «код-мозга» ролевой истории. Ниже — утверждения «один держится за другого намертво» с фактом, на который каждое опирается, и тексты, по которым их ставили (карточки, лорбуки и свод всей истории, если он дан). «Намертво» — значит, что бы ни случилось, не отвернётся и простит что угодно: за этим годы и общая беда, а не симпатия, не долг службы и не первая влюблённость. Суди на дату чата: будущее сюда не переноси. Для каждого утверждения реши, подтверждают ли его тексты. Сомневаешься — false. Ответь только одним JSON: {"ok":[true,false]} — по порядку утверждений, значений столько же, сколько утверждений.`;
 
 /**
- * Связи этого чата расставляет ИИ: троп пары, романтика и кто к кому уже привязан намертво — на дату чата (в прошлой
- * эпохе отношения другие, и «намертво» бывает в одну сторону). Вписанное руками и названное ею самой не трогает;
- * прежнюю расстановку ИИ заменяет новой. Замки в Life не ставит: «намертво» из пары живёт только в мозге.
+ * Расстановку этого чата делает ИИ — одним запросом на весь состав, умной моделью Life: КАК каждый привязывается
+ * (способ, рана отвержения, как берёт алкоголь) и ЧТО между героями (троп пары, романтика, кто к кому уже привязан
+ * намертво) — на дату чата. Героев он видит сразу всех и сравнивает между собой: поодиночке модель раздаёт
+ * травмированным один и тот же способ, а абсолютные оценки у неё плавают сильнее, чем сравнения.
+ * «Намертво» идёт вторым запросом на перепроверку (сомнение — снять): в настоящем оно запирает шкалы Life.
+ * Вписанное руками не трогает. force — переставить и то, что ИИ решал раньше (кнопка); без него — только пустое.
  */
-async function fillBonds() {
+async function fillCast({ force = false } = {}) {
     const U = user();
     const cast = [U, ...mains()].filter(Boolean).slice(0, 9);
     if (cast.length < 2) throw new Error('в этом чате некого связывать');
@@ -1282,43 +1299,100 @@ async function fillBonds() {
     const parts = [];
     for (const n of cast) { try { parts.push((await sourcesOf(n)).slice(0, whole ? 2600 : 4200)); } catch { /* о нём ничего не нашлось — не беда */ } }
     if (!parts.length) throw new Error('ни карточек, ни лорбука о них не нашлось');
-    const usr = [`Герои (так их и называй): ${cast.join('; ')}. Персонаж игрока: ${U || '—'}.`, whenLine(), ...parts].filter(Boolean).join('\n\n———\n\n');
-    const check = { check: (x) => !!x && Array.isArray(x.pairs), what: 'Связи' };
-    const msgs = [{ role: 'system', content: BONDS_SYS() + (whole ? '\nТебе дан «Свод всей истории»: он важнее общих слов карточек — суди по тому, что между ними на деле было.' : '') }, { role: 'user', content: usr }];
-    const j = whole && A.askFillJson ? await A.askFillJson(msgs, 2600, check, { max: 16000 }) : await A.askJson(msgs, 1700, check);
-    const known = (n) => { const x = str(n, 60); return x ? (cast.find(c => A.sameName(c, x)) ? A.canonName(cast.find(c => A.sameName(c, x))) : x) : ''; };
+    const texts = [`Герои (так их и называй): ${cast.join('; ')}. Персонаж игрока: ${U || '—'}.`, whenLine(), noteLine(), ...parts].filter(Boolean).join('\n\n———\n\n');
+    const ask = (sys, usr, tokens, check) => {
+        const msgs = [{ role: 'system', content: sys }, { role: 'user', content: usr }];
+        return whole && A.askFillJson ? A.askFillJson(msgs, tokens, check, { max: 16000 }) : askSmart(msgs, Math.round(tokens * 0.7), check);
+    };
+    const j = await ask(CAST_SYS() + (whole ? '\nТебе дан «Свод всей истории»: он важнее общих слов карточек — суди по тому, что между героями на деле было и как каждый себя вёл.' : ''), texts, 3400, { check: (x) => !!x && (Array.isArray(x.pairs) || Array.isArray(x.people)), what: 'Расстановка' });
+    const known = (n) => { const x = str(n, 60); const c = x ? cast.find(y => A.sameName(y, x)) : ''; return c ? A.canonName(c) : ''; };
     const same = (p, a, b) => (A.sameName(p.a, a) && A.sameName(p.b, b)) || (A.sameName(p.a, b) && A.sameName(p.b, a));
+    // пары: «намертво» без названного факта не считается
+    const rows = [];
+    for (const r of arr(j.pairs).slice(0, 16)) {
+        const a = known(r?.a), b = known(r?.b);
+        if (!a || !b || A.sameName(a, b) || !TROPES[r.trope] || rows.some(p => same(p, a, b))) continue;
+        const fact = str(r.fact, 200);
+        const own = ['a', 'b', 'both'].includes(r.own) && fact.length > 5 ? r.own : '';
+        rows.push({ a, b, id: r.trope, rom: ROM_NAME[r.rom] ? r.rom : 'no', own, why: str(r.why, 140), fact: own ? fact : '', by: 'ai' });
+    }
+    // второй голос: каждое «намертво» — по одному направлению — на перепроверку по тем же текстам
+    const claims = rows.flatMap(p => [['a', p.a, p.b], ['b', p.b, p.a]].filter(([s]) => p.own === s || p.own === 'both').map(([s, from, to]) => ({ p, s, from, to })));
+    let cutOwn = 0;
+    if (claims.length) {
+        try {
+            const usr = `Утверждения:\n${claims.map((c, k) => `${k + 1}. ${c.from} держится за ${c.to} намертво. Факт: ${c.p.fact}`).join('\n')}\n\n———\n\n${texts}`;
+            const v = await ask(OWN_CHECK_SYS, usr, 900, { check: (x) => Array.isArray(x?.ok), what: 'Перепроверка «намертво»' });
+            if (v.ok.length === claims.length) {
+                for (const p of rows) {
+                    if (!p.own) continue;
+                    const keep = ['a', 'b'].filter(s => claims.some((c, k) => c.p === p && c.s === s && v.ok[k] === true));
+                    const next = keep.length === 2 ? 'both' : keep[0] || '';
+                    if (next !== p.own) cutOwn++;
+                    p.own = next;
+                    if (!next) p.fact = '';
+                }
+            }
+        } catch (e) { console.warn('[Мозг] перепроверка «намертво» не прошла — оставляю как есть', e); }
+    }
     const m = M();
-    // остаются: вписанное руками, названное ею и нетронутые тропы по умолчанию; прежняя расстановка ИИ уходит
+    // остаются: вписанное руками и названное ею; прежняя расстановка ИИ уходит
     const next = pairs().filter(p => p.by !== 'ai' || p.hand);
     let n = 0;
-    for (const r of j.pairs.slice(0, 16)) {
-        const a = known(r?.a), b = known(r?.b);
-        if (!a || !b || A.sameName(a, b) || !TROPES[r.trope]) continue;
-        const had = next.find(p => same(p, a, b));
+    for (const row of rows) {
+        const had = next.find(p => same(p, row.a, row.b));
         if (had && (had.hand || had.her)) continue;
-        const row = { a, b, id: r.trope, rom: ROM_NAME[r.rom] ? r.rom : 'no', own: ['a', 'b', 'both'].includes(r.own) ? r.own : '', why: str(r.why, 140), by: 'ai' };
         if (had) next.splice(next.indexOf(had), 1, row); else next.push(row);
         n++;
     }
     m.pairs = next;
+    // люди: способ привязываться, рана, алкоголь — кроме того, что вписано руками; у персонажа игрока — только алкоголь
+    let styled = 0;
+    for (const r of arr(j.people).slice(0, 12)) {
+        const name = known(r?.name);
+        if (!name) continue;
+        const bz = Number.isFinite(+r?.booze) ? Math.round(P.clamp(r.booze, 0.5, 5) * 10) / 10 : null;
+        if (A.sameName(name, U)) {
+            if (bz != null && m.meTolBy !== 'hand' && (force || m.meTolBy !== 'ai')) { m.meTol = bz; m.meTolBy = 'ai'; }
+            continue;
+        }
+        const t0 = temperOf(name);
+        if (t0.styleBy === 'hand' || (!force && (t0.styleBy === 'ai' || t0.seeded))) continue;
+        const id = styleId(r?.attach);
+        if (!id) continue;
+        editTemper(name, (x) => {
+            x.attach = id;
+            if (Number.isFinite(+r.reject)) x.reject = P.clamp(r.reject, 0.6, 1.8);
+            if (bz != null) x.booze = bz;
+            x.styleBy = 'ai';
+            x.styleWhy = str(r.why, 140);
+            delete x.seeded;
+        });
+        styled++;
+    }
     m.bondsAt = Date.now();
     m.bondsStory = whole;
     relCache.clear();
     saveM();
+    const pins = syncPins();
     safe(() => A.updatePrompt());
-    return n;
+    return { pairs: n, own: next.filter(p => p.by === 'ai' && !p.hand && p.own).length, cutOwn, styled, pins };
+}
+/** Одной строкой — что расставлено (для сообщения). */
+function castDone(r) {
+    const bits = [r.pairs ? `связей — ${r.pairs}` : '', r.own ? `намертво — ${r.own}${r.pins ? ' (любовь и близость заперты на 100)' : ''}` : '', r.styled ? `способ привязываться — ${r.styled}` : ''].filter(Boolean);
+    return bits.length ? `Расставлено по истории: ${bits.join(', ')}.` : '';
 }
 
 async function collect(who) {
     const name = A.canonName(who);
-    const usr = await sourcesOf(name);
+    const usr = [await sourcesOf(name), noteLine()].filter(Boolean).join('\n\n');
     // есть свод всей истории (Life 0.59) — он идёт в запрос, а считает умная модель: кассеты и больные места берутся
     // из того, как человек на самом деле вёл себя за всю историю, а не из последних постов и общих слов карточки
     const whole = safe(() => !!A.story?.ready(), false);
     const check = { check: (x) => !!x && typeof x === 'object' && (!!x.cass || !!x.base), what: 'Темперамент' };
     const msgs = [{ role: 'system', content: COLLECT_SYS + DEPTH_RULE + (whole ? STORY_RULE : '') }, { role: 'user', content: usr }];
-    const j = whole && A.askFillJson ? await A.askFillJson(msgs, 8000, check, { who: name, max: 18000 }) : await A.askJson(msgs, 4200, check);
+    const j = whole && A.askFillJson ? await A.askFillJson(msgs, 8000, check, { who: name, max: 18000 }) : await askSmart(msgs, 4200, check);
     const old = temperOf(name);
     const t = editTemper(name, (x) => {
         for (const a of P.AXES) x.base[a] = Math.round(P.clamp(j.base?.[a] ?? x.base[a], -30, 30));
@@ -1370,10 +1444,27 @@ let ensuring = false;
 /** Фоном, когда открыт чат: у главных без темперамента — собрать по одному (раз в шесть часов на попытку). */
 async function ensure() {
     // круг «своих» и способы привязываться по умолчанию — без запросов к модели, поэтому и при выключенном автосборе
-    if (on()) { safe(() => syncCircle()); for (const who of list()) safe(() => seedTemper(who)); }
+    if (on()) safe(() => syncPins());
     if (ensuring || !on() || cfg().auto === false || !A.askJson) return;
     ensuring = true;
     try {
+        // расстановка: в чате, где её ещё не было, делает ИИ; свод появился позже — один раз заново (уже со сводом)
+        {
+            const m = M();
+            const whole = safe(() => !!A.story?.ready(), false);
+            const empty = !pairs().length && !m.bondsAt;
+            const redo = !!m.bondsAt && whole && m.bondsStory === false;
+            if (mech('style') && list().length && (empty || redo) && Date.now() - num(m.bondsTried) >= 6 * 36e5) {
+                m.bondsTried = Date.now();
+                saveM();
+                try {
+                    const r = await fillCast({ force: redo });
+                    const text = castDone(r);
+                    if (text) A.toast('success', `${text} Посмотреть и поправить — Сцена → ${TITLE} → «К кому как».`, TITLE, { timeOut: 7000 });
+                    refresh();
+                } catch (e) { console.warn('[Мозг] расстановка', e); }
+            }
+        }
         for (const who of list()) {
             const k = keyOf(who);
             const c = cfg();
@@ -1404,20 +1495,6 @@ async function ensure() {
                 safe(() => A.updatePrompt());
                 refresh();
             } catch (e) { console.warn(`[Мозг] темперамент ${who}`, e); }
-        }
-        // связи: в чате, где троп ни у кого не задан, расставляет ИИ; свод появился позже — один раз заново
-        const m = M();
-        const whole = safe(() => !!A.story?.ready(), false);
-        const empty = !pairs().length && !m.bondsAt;
-        const redo = !!m.bondsAt && whole && m.bondsStory === false;
-        if (mech('style') && list().length && (empty || redo) && Date.now() - num(m.bondsTried) >= 6 * 36e5) {
-            m.bondsTried = Date.now();
-            saveM();
-            try {
-                const n = await fillBonds();
-                if (n) A.toast('success', `Связи расставлены по истории: ${n}. Посмотреть и поправить — Сцена → ${TITLE} → «К кому как».`, TITLE, { timeOut: 6000 });
-                refresh();
-            } catch (e) { console.warn('[Мозг] связи', e); }
         }
     } finally { ensuring = false; }
 }
@@ -1492,6 +1569,9 @@ function hintsHtml(v, who) {
 
 /** Потребности: шесть шкал «сыт — голоден» и то, что из них сейчас выходит. Тап — утолить. */
 /** «К кому как»: привязанности и умные статы пары — что любовь сейчас делает с тем, что от этого человека приходит. */
+/** Кто решил способ привязываться: ИИ (и почему) или руки. */
+const styleBy = (t) => (t.styleBy === 'hand' ? '✋ вписано руками — ИИ не тронет' : t.styleBy === 'ai' ? `ИИ: ${t.styleWhy || 'по истории'}` : '');
+const smartLine = () => (smartName() ? `Решает умная модель Life — ${smartName()}.` : 'Умная модель в Life не выбрана — решает модель Летописца. Выбрать: Life → Мир → ⚙ → «Умная модель».');
 function bondsHtml(v, who) {
     const list = bondsOf(who, v.s, v.E, v.t).filter(b => b.t.L >= 0.2).slice(0, 3);
     if (!list.length) return '';
@@ -1521,9 +1601,9 @@ function bondsHtml(v, who) {
         </div>`;
     };
     return `${A.sec('К кому как', 'считается каждый пост')}
-        ${sty ? `<div class="brn-style"><b>Привязывается: ${esc(sty.name)}</b><small>${esc(sty.how)}${rejectOf(v.t) >= 1.3 ? ' · рана отвержения: заранее ждёт, что бросят' : ''}</small></div>` : ''}
+        ${sty ? `<div class="brn-style"><b>Привязывается: ${esc(sty.name)}</b><small>${esc(sty.how)}${rejectOf(v.t) >= 1.3 ? ' · рана отвержения: заранее ждёт, что бросят' : ''}</small>${styleBy(v.t) ? `<small class="brn-by">${esc(styleBy(v.t))}</small>` : ''}</div>` : own ? '<div class="lf-hint">Как привязывается — ещё не решено: расставит ИИ (кнопка ниже) или впиши сама в «Темперамент и кассеты».</div>' : ''}
         <div class="brn-bonds">${list.map(row).join('')}</div>
-        ${own ? `<div class="lf-chips"><button class="lf-chip" data-bact="bonds-fill">✨ Расставить связи по истории</button></div><div class="lf-hint">ИИ читает карточки, лорбуки и свод и расставляет тропы, романтику и то, кто к кому уже привязан намертво, — на дату этого чата. В чате, где связей ещё нет, делает это сам. Вписанное руками не трогает.</div>` : ''}
+        ${own ? `<div class="lf-chips"><button class="lf-chip" data-bact="bonds-fill">✨ Расставить по истории</button></div><div class="lf-hint">ИИ читает карточки, лорбуки и свод и решает за весь состав сразу, сравнивая героев между собой: кто как привязывается (способ, рана отвержения, как берёт алкоголь) и что между ними — троп, романтика, кто к кому уже привязан намертво. На дату этого чата. В чате, где расстановки ещё не было, делает это сам. Вписанное руками не трогает. ${esc(smartLine())}</div><div class="lf-hint">${pastEra() ? 'Это чат прошлой эпохи: «намертво» здесь живёт только в мозге, замков в «Отношениях» Life нет.' : '«Намертво» в настоящем истории ещё и запирает в «Отношениях» Life любовь и близость на 100 — в ту сторону, в какую привязан. Сменишь — замок снимется.'}</div>` : ''}
         <div class="lf-hint">Шкалы пары — из «Отношений» Life. Здесь — что из них выходит прямо сейчас.</div>
         <details class="lf-details" ${det('circle')}><summary>Свои <small>космическая привязанность · ${circle().length ? esc(circle().join(', ')) : 'никого'}</small></summary>
             <div class="lf-field"><label>Кто между собой «свои» — по имени на строку</label><textarea rows="5" data-bin="circle">${esc(circle().join('\n'))}</textarea></div>
@@ -1594,7 +1674,7 @@ function temperHtml(who, t) {
         ${range(who, 'wit', t.wit, 0, 2, 0.1, 'Юмор', '0 — не шутит никогда, 2 — шутит всегда и обо всём; каким юмором — решает состояние')}
         ${A.sec('Как привязывается', 'к своим')}
         <div class="lf-field"><select data-bin="ts" data-k="attach" data-who="${esc(who)}" aria-label="Как привязывается"><option value="">не задано</option>${STYLE_IDS.map(k => `<option value="${k}"${styleId(t.attach) === k ? ' selected' : ''}>${esc(STYLES[k].name)}</option>`).join('')}</select></div>
-        ${STYLES[styleId(t.attach)] ? `<div class="lf-hint">${esc(cap(STYLES[styleId(t.attach)].how))}. Когда связь под угрозой — ${esc(STYLES[styleId(t.attach)].kind)}.</div>` : '<div class="lf-hint">Не задано — выберет ИИ при сборе темперамента (кнопка ниже), по карточке, лорбуку и своду.</div>'}
+        ${STYLES[styleId(t.attach)] ? `<div class="lf-hint">${esc(cap(STYLES[styleId(t.attach)].how))}. Когда связь под угрозой — ${esc(STYLES[styleId(t.attach)].kind)}.${styleBy(t) ? ` <span class="brn-by">${esc(styleBy(t))}</span>` : ''}</div>${t.styleBy === 'hand' ? '<div class="lf-hint">Вернуть выбор ИИ — поставь «не задано»: при следующей расстановке он решит сам (вместе с раной отвержения и алкоголем).</div>' : ''}` : '<div class="lf-hint">Не задано — выберет ИИ при расстановке по истории («К кому как» → ✨): по карточке, лорбуку и своду, сравнив героев между собой.</div>'}
         ${range(who, 'reject', t.reject, 0.5, 2, 0.1, 'Рана отвержения', '1 — как у всех; выше — заранее ждёт, что бросят: сильнее боится потерять, ревнует, уход читает громче')}
         ${A.sec('Стержень', 'чем живёт')}
         ${SPINE_KEYS.map(k => `<div class="lf-field"><label>${SPINE_NAME[k]}</label><textarea rows="2" data-bin="sp" data-k="${k}" data-who="${esc(who)}">${esc(t.spine[k])}</textarea></div>`).join('')}
@@ -1715,9 +1795,11 @@ function bodyHtml() {
             ${sw('drive', 'Вести состояние персонажа во «Внутри» Life (лица, чипы, соседние трекеры видят то же)')}
             ${sw('brk', 'Срывы: когда накопилось и держать нечем')}
             ${sw('aura', 'Ауры в Сцене')}
-            ${sw('auto', 'Сам собирать темперамент по карточке и лорбуку')}
+            ${sw('auto', 'Сам собирать темперамент и расставлять связи — ИИ, по карточкам, лорбукам и своду')}
             <div class="brn-rng"><label>Сколько твоего поста видит Летописец<b data-out>${Math.round(P.clamp(c.postChars ?? 6000, 700, 20000))}</b></label><input type="range" min="700" max="20000" step="100" value="${Math.round(P.clamp(c.postChars ?? 6000, 700, 20000))}" data-bin="me" data-k="post"><small>Знаков. Сам Life показывает Летописцу только первые 700 — мозг досылает пост целиком, чтобы не терялось то, что ты написала в конце.</small></div>
-            ${mech('booze') && user() ? `<div class="brn-rng"><label>Как алкоголь берёт ${esc(short(user()))}<b data-out>${meTol()}</b></label><input type="range" min="0.4" max="6" step="0.1" value="${meTol()}" data-bin="me" data-k="booze"><small>Твоего персонажа мозг не ведёт — только считает выпитое: стадию и похмелье. 0.6 — с бокала, 1 — как всех, 4 и выше — почти не берёт.</small></div>${meNow() ? '' : '<div class="lf-chips"><button class="lf-chip" data-bact="me-drink">налить</button></div>'}` : ''}
+            ${mech('booze') && user() ? `<div class="brn-rng"><label>Как алкоголь берёт ${esc(short(user()))}<b data-out>${meTol()}</b></label><input type="range" min="0.4" max="6" step="0.1" value="${meTol()}" data-bin="me" data-k="booze"><small>Твоего персонажа мозг не ведёт — только считает выпитое: стадию и похмелье. 0.6 — с бокала, 1 — как всех, 4 и выше — почти не берёт. ${M().meTolBy === 'ai' ? 'Сейчас — как решил ИИ при расстановке; сдвинешь — останется по-твоему.' : M().meTolBy === 'hand' ? '✋ Выставлено руками — ИИ не тронет.' : 'ИИ выставит при расстановке по истории; сдвинешь — останется по-твоему.'}</small></div>${meNow() ? '' : '<div class="lf-chips"><button class="lf-chip" data-bact="me-drink">налить</button></div>'}` : ''}
+            <div class="lf-field"><label>Что ИИ должен знать, когда расставляет <small>(необязательно)</small></label><textarea rows="4" data-bin="note" data-k="aiNote" placeholder="То, чего нет в карточках и лорбуках, или что важнее их: кто кому кто, по какому сценарию живёт пара, кого почти не берёт алкоголь.">${esc(str(c.aiNote, 1500))}</textarea></div>
+            <div class="lf-hint">Уходит ИИ вместе с карточками и лорбуками — при расстановке по истории и при сборе темперамента. ${esc(smartLine())}</div>
             <div class="lf-hint">Мозг ${VERSION}. Летописец после каждого ответа называет, что случилось с человеком; оси, волю, напряжение и несказанное считает код, время — по Horae. Модель получает кассету — без цифр.${A.senses ? '' : ' Life старой версии: раны, недосып и Камни мозг пока не видит — обнови Life.'}</div>
         </details>`;
 }
@@ -1811,10 +1893,11 @@ async function onClick(ev) {
         if (act === 'rest') manual(who, { act: 'rest' });
         if (act === 'drink' || act === 'sober') manual(who, { act });
         if (act === 'bonds-fill') {
-            let n = 0;
-            const run = async () => { n = await fillBonds(); };
+            let r = null;
+            const run = async () => { r = await fillCast({ force: true }); };
             if (A.withBusy) await A.withBusy(el, run, 'Читаю…'); else await run();
-            A.toast(n ? 'success' : 'info', n ? `Связи расставлены: ${n}.` : 'ИИ не нашёл, что расставить: вписанное тобой осталось как было.', TITLE, { timeOut: 3500 });
+            const text = r ? castDone(r) : '';
+            A.toast(text ? 'success' : 'info', text ? `${text}${r.cutOwn ? ` Перепроверка сняла «намертво»: ${r.cutOwn}.` : ''}` : 'ИИ не нашёл, что расставить: вписанное тобой осталось как было.', TITLE, { timeOut: 6000 });
         }
         if (act === 'me-drink' || act === 'me-sober') meHand(act === 'me-drink' ? 'drink' : 'sober');
         if (act === 'reset') manual(who, { act: 'reset' });
@@ -1866,14 +1949,15 @@ function onChange(ev) {
     try {
         if (kind === 'g') { cfg()[k] = !!el.checked; saveCfg(); }
         if (kind === 'me' && k === 'post') { cfg().postChars = Math.round(P.clamp(el.value, 700, 20000)); saveCfg(); }
-        if (kind === 'me' && k === 'booze') { cfg().meBooze = P.clamp(el.value, 0.4, 6); saveCfg(); safe(() => A.updatePrompt()); }
+        if (kind === 'me' && k === 'booze') { const v = P.clamp(el.value, 0.4, 6); cfg().meBooze = v; saveCfg(); Object.assign(M(), { meTol: v, meTolBy: 'hand' }); saveM(); safe(() => A.updatePrompt()); }
+        if (kind === 'note' && k === 'aiNote') { cfg().aiNote = str(String(el.value || ''), 1500); saveCfg(); }
         if (kind === 'm' && MECH.some(x => x[0] === k)) { cfg().mech[k] = !!el.checked; saveCfg(); }
         if (kind === 'on') editTemper(who, (t) => { t.on = !!el.checked; });
         if (kind === 't') {
             const [a, b] = k.split('.');
             const val = Number(el.value);
             const old = temperOf(who);
-            const t = editTemper(who, (x) => { if (b) x[a][b] = val; else x[a] = val; if (a === 'reject' || a === 'booze') x.seeded = TEMPER_V; else x.src = 'hand'; });
+            const t = editTemper(who, (x) => { if (b) x[a][b] = val; else x[a] = val; if (a === 'reject' || a === 'booze') { x.styleBy = 'hand'; delete x.seeded; } else x.src = 'hand'; });
             if (a === 'base') { const s = stateOf(who); s.base[b] = P.clamp(s.base[b] + (t.base[b] - old.base[b]), -100, 100); saveM(); }
         }
         if (kind === 'c') {
@@ -1889,12 +1973,13 @@ function onChange(ev) {
                 t.src = 'hand';
             });
         }
-        if (kind === 'ts' && k === 'attach') editTemper(who, (t) => { t.attach = styleId(el.value); t.seeded = TEMPER_V; });
+        // выбрала способ — он твой; вернула «не задано» — отдала выбор ИИ (вместе с раной отвержения и алкоголем)
+        if (kind === 'ts' && k === 'attach') editTemper(who, (t) => { t.attach = styleId(el.value); t.styleBy = t.attach ? 'hand' : ''; if (!t.attach) t.styleWhy = ''; delete t.seeded; });
         if (kind === 'sp' && SPINE_KEYS.includes(k)) editTemper(who, (t) => { t.spine[k] = str(String(el.value || '').replace(/\s+/g, ' '), 180); t.v = TEMPER_V; });
-        if (kind === 'tr') setPair(who, el.dataset.to, { id: TROPES[el.value] ? el.value : '', hand: true });
+        if (kind === 'tr') { setPair(who, el.dataset.to, { id: TROPES[el.value] ? el.value : '', hand: true }); syncPins(); }
         if (kind === 'rom' && pairOf(who, el.dataset.to)) setPair(who, el.dataset.to, { rom: ROM_NAME[el.value] ? el.value : 'no', hand: true });
-        if (kind === 'own') { setPair(who, el.dataset.to, { own: ['a', 'b', 'both'].includes(el.value) ? el.value : '', hand: true }); safe(() => A.updatePrompt()); }
-        if (kind === 'circle') { M().circle = linesOf(el.value).map(x => str(x, 40)).filter(Boolean).slice(0, 12); M().circleAuto = false; saveM(); relCache.clear(); syncCircle(); }   // вписано руками — эпоха круг больше не чистит
+        if (kind === 'own') { setPair(who, el.dataset.to, { own: ['a', 'b', 'both'].includes(el.value) ? el.value : '', hand: true }); syncPins(); safe(() => A.updatePrompt()); }
+        if (kind === 'circle') { M().circle = linesOf(el.value).map(x => str(x, 40)).filter(Boolean).slice(0, 12); M().circleAuto = false; saveM(); relCache.clear(); syncPins(); }   // вписано руками — эпоха круг больше не чистит
         if (kind === 'f') editTemper(who, (t) => { t.fix = linesOf(el.value); t.src = 'hand'; });
         if (kind === 'b') {
             editTemper(who, (t) => {
