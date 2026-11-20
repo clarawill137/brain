@@ -7,7 +7,7 @@ const world = { timestamp: { story_date: '2024-12-01', story_time: '10:00' }, sc
 const chat = [];
 const post = (name, user = false) => { chat.push({ name, is_user: user, is_system: false, mes: '…', horae_meta: { timestamp: { ...world.timestamp } } }); return chat.length - 1; };
 const handlers = {};
-const st = { ext: { brain: { auto: false } }, md: {}, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [], faces: [], rel: {} };
+const st = { ext: { brain: { auto: false } }, md: {}, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [], faces: [], rel: {}, story: null, fill: [] };
 
 const api = {
     ctx: () => ({ name1: 'Хеди Барлоу', extensionSettings: st.ext, chatMetadata: st.md, saveSettingsDebounced() {}, saveMetadataDebounced() {}, eventSource: { on() {} }, eventTypes: { CHAT_CHANGED: 'chat' } }),
@@ -52,6 +52,8 @@ const api = {
         face: (i, who, k) => { st.faces.push([i, first(who), k]); return true; },
         rel: (a, b) => st.rel[`${first(a)}>${first(b)}`] || { closeness: 90 },
     },
+    story: { ready: () => !!st.story, felt: (who, w = 2) => (st.story?.felt || []).filter(f => f.w >= w) },
+    askFillJson: async (messages, tokens, o, opts) => { st.fill.push({ messages, tokens, opts }); return api.askJson(); },
     lore: { about: async () => 'Лор о нём.', card: () => 'Карточка.', core: () => '• говорит коротко', key: (w) => String(w).trim(), coreAdd: (who, line) => { st.core.push([who, line]); return true; } },
     shelf: { tracker: (t) => { st.shelf.tracker = t; return true; }, mind: (f) => { st.shelf.mind = f; }, recs: (f) => { st.shelf.recs = f; }, open() {} },
 };
@@ -734,4 +736,63 @@ test('0.5: механизмы выключаются по одному', async (
     assert.equal(brain.view(B).wit, '');
     change({ bin: 'm', k: 'wit' }, '', { checked: true });
     delete st.rel['баки>хеди'];
+});
+
+// ───── 0.6: поправки по исследованиям и заполнение по всей истории ─────
+
+test('0.6: темперамент по всей истории — свод в запрос, умная модель, пережитое ложится в память', async () => {
+    await fresh(5000);
+    assert.match(st.shelf.tracker.html(), /Свод всей истории ещё не собран/);
+    st.story = { felt: [{ day: '2024-11-20', mes: 3, t: 'она сказала да', emo: 'tender', w: 3 }, { day: '2024-11-25', mes: 9, t: 'увидел запись ГИДРЫ', emo: 'shame', w: 3 }, { day: '2024-11-26', mes: 12, t: 'она уехала на день', emo: 'low', w: 2 }, { day: '2024-11-27', mes: 14, t: 'мелочь', emo: 'low', w: 1 }] };
+    assert.match(st.shelf.tracker.html(), /Собрать по всей истории/);
+    const before = st.fill.length;
+    await click({ bact: 'collect', who: B });
+    assert.equal(st.fill.length, before + 1, 'пошло через большое заполнение');
+    const f = st.fill[st.fill.length - 1];
+    assert.equal(f.opts.who, B);
+    assert.ok(f.tokens >= 7000);
+    assert.match(f.messages[0].content, /Свод всей истории/);
+    assert.equal(st.ext.brain.prof[B].story, true);
+    assert.match(st.shelf.tracker.html(), /собран по всей истории, карточке и лорбуку/);
+    const marks = live().marks.map(m => m.t);
+    assert.ok(marks.includes('она сказала да') && marks.includes('увидел запись ГИДРЫ') && marks.includes('она уехала на день'));
+    assert.ok(!marks.includes('мелочь'));
+    assert.equal(live().filled, true);
+    await click({ bact: 'collect', who: B });
+    assert.equal(live().marks.filter(m => m.t === 'она сказала да').length, 1, 'повторный сбор меток не плодит');
+    st.story = null;
+});
+
+test('0.6: тайна давит фоном, мысли по кругу не дают напряжению спасть', async () => {
+    await fresh(5100);
+    const calm = brain.view(B).E.val;
+    st.kept['баки'] = { n: 3, list: [] };
+    assert.ok(brain.view(B).E.val <= calm - 4, 'три тайны — фон темнее');
+    st.kept['баки'] = { n: 0, list: [] };
+    next([{ who: 'Баки', blow: 3, why: 'увидел своё досье' }]);
+    next([{ who: 'Баки', blow: 3, why: 'и ещё одно' }]);
+    assert.ok(!/мысли ходят по кругу/.test(st.shelf.tracker.html()), 'сразу — ещё не залип');
+    hour(5107); next([{ who: 'Баки', blow: 2, why: 'снова об этом' }]);
+    assert.match(st.shelf.tracker.html(), /мысли ходят по кругу — не отпускает/);
+    assert.ok(brain.view(B).combo.includes('loop'));
+});
+
+test('0.6: заражение зависит от того, что между ними', async () => {
+    const N = 'Наташа Романофф';
+    const run = async (rel, h) => {
+        st.rel['наташа>баки'] = rel;
+        world.scene.characters_present = ['Баки Барнс', 'Наташа Романофф'];
+        await fresh(h);
+        st.md.brain.who[N] = undefined;
+        next();
+        const a0 = st.md.brain.who[N].fast.aro;
+        next([{ who: 'Баки', threat: 3, bound: 3, why: 'тревога, двери заблокированы' }]);
+        return st.md.brain.who[N].fast.aro - a0;
+    };
+    const plain = await run({ closeness: 90 }, 5200);
+    const haven = await run({ closeness: 100, trust: 95, love: 80, tension: 5 }, 5300);
+    const sour = await run({ closeness: 90, trust: 60, tension: 95 }, 5400);
+    assert.ok(haven < plain && plain < sour, `в ладу ${haven} < обычно ${plain} < накопилось ${sour}`);
+    delete st.rel['наташа>баки'];
+    world.scene.characters_present = ['Баки Барнс', 'Хеди Барлоу'];
 });

@@ -117,9 +117,12 @@ test('память с чувством: сильное запоминается,
     assert.equal(s.marks.length, 3);
     assert.equal(P.pickRecall(s, { id: 'low', step: 2 }, 20), null, 'свежее не всплывает');
     assert.equal(P.pickRecall(s, { id: 'low', step: 1 }, 60), null, 'на слабом чувстве не всплывает');
+    assert.equal(P.pickRecall(s, { id: 'low', step: 2 }, 60), null, 'от одной вспышки плохое не всплывает — нужно тяжёлое настроение');
+    s.mood.val = -20; s.mood.ctl = -20;
     assert.equal(P.pickRecall(s, { id: 'low', step: 2 }, 60).t, 'она ушла, хлопнув дверью');
     assert.equal(P.pickRecall(s, { id: 'fear', step: 2 }, 60).emo, 'shame', 'нет того же чувства — берёт того же знака, тяжёлое и свежее');
-    assert.equal(P.pickRecall(s, { id: 'tender', step: 2 }, 60).emo, 'tender', 'в тепле всплывает хорошее');
+    s.mood.val = 0; s.mood.ctl = 0;
+    assert.equal(P.pickRecall(s, { id: 'tender', step: 1 }, 60).emo, 'tender', 'хорошее всплывает легче: уже с первой ступени');
     const m = P.pickRecall(s, { id: 'low', step: 3 }, 60);
     m.r = 60;
     assert.notEqual(P.pickRecall(s, { id: 'low', step: 3 }, 70)?.id, m.id, 'то же самое подряд не всплывает');

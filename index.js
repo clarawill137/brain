@@ -11,7 +11,7 @@ import { DRIVE_NAME, DRIVE_ICON, BAND_NAME, freshDrives, healDrives, driveHit, d
 import { hints } from './core/hints.js';
 import { SOFT, tie, pairStats, lens, haven, afterHurt } from './core/bonds.js';
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const ID = 'brain';
 const TITLE = '🧠 Мозг';
 const NARR = /рассказчик|narrator|мастер|game ?master|(^|[^a-z])gm([^a-z]|$)|мнемозина/i;
@@ -229,7 +229,7 @@ function around(who, here = present()) {
 function signals(who, t = temperOf(who), s = stateOf(who)) {
     const S = A.senses || {};
     const off = { val: 0, aro: 0, ctl: 0, wor: 0 };
-    const out = { off, strainIn: 0, maskIn: 0, willMul: 1, willCap: 100, raw: 1, sleepQ: 1, loose: false, worry: false, night: false, date: null, list: [] };
+    const out = { off, strainIn: 0, maskIn: 0, willMul: 1, willCap: 100, raw: 1, sleepQ: 1, drain: 0.8, giddy: 1, loose: false, worry: false, night: false, date: null, list: [] };
     const add = (id, text, o = {}) => { for (const a of P.AXES) off[a] += o[a] || 0; out.list.push({ id, text }); };
     const today = nowStamp().day;
     // химия: что сейчас действует
@@ -249,12 +249,16 @@ function signals(who, t = temperOf(who), s = stateOf(who)) {
         out.willMul *= Math.max(0.35, 1 - debt / 20);
         out.raw *= 1 + Math.min(debt, 16) / 40;
         out.sleepQ = Math.max(0.2, 1 - debt / 12);
+        out.drain += Math.min(0.5, debt / 24);
+        // недосып раскачивает в обе стороны (Gujar и др., 2011): не только плохое острее, но и веселье с азартом — шире
+        out.giddy = 1 + Math.min(debt, 16) / 60;
     }
     const nd = safe(() => S.needs?.(who), null);
     if (nd) {
         if (num(nd.energy, 80) < 30) {
             const flat = nd.energy < 15;
             add('tired', flat ? 'валится с ног' : 'усталость', { aro: flat ? -18 : -10, val: -4 });
+            out.drain += flat ? 0.4 : 0.25;
             out.strainIn += 0.4;
             out.willCap = Math.min(out.willCap, flat ? 55 : 75);
         }
@@ -281,7 +285,9 @@ function signals(who, t = temperOf(who), s = stateOf(who)) {
     }
     // несказанное: тайны, которые держит от неё, и свои желания, о которых давно молчит
     const kept = U ? safe(() => S.kept?.(who, U), null) : null;
-    if (kept?.n) { out.maskIn += Math.min(1.5, 0.25 * kept.n); out.list.push({ id: 'kept', text: `тайны, которых не знает ${short(U)}: ${kept.n}` }); }
+    // тайна тяготит не моментом, когда её прячешь, а тем, что к ней возвращаются мысли (Slepian и др., 2017):
+    // поэтому груз идёт всё время — и рядом с ней, и без неё, — и давит на фон, а не только копит несказанное
+    if (kept?.n) { out.maskIn += Math.min(1.5, 0.25 * kept.n); add('kept', `тайны, которых не знает ${short(U)}: ${kept.n}`, { val: -Math.min(6, 1.5 * kept.n) }); }
     const lastI = A.chatArr().length - 1;
     const unsaid = safe(() => S.wants?.(who) || [], []).filter(w => w.voiced == null && lastI - num(w.mes) >= 30).length;
     if (unsaid) { out.maskIn += Math.min(0.6, 0.15 * unsaid); out.list.push({ id: 'unsaid', text: `молчит о своих желаниях: ${unsaid}` }); }
@@ -317,6 +323,10 @@ function signals(who, t = temperOf(who), s = stateOf(who)) {
             if (rb === 2) { out.loose = true; out.strainIn += 0.3; out.willCap = Math.min(out.willCap, 85); }
         }
         out.role = rb;
+        // мысли по кругу держат тело в стрессе и после того, как всё кончилось (Brosschot и др., 2006): пока залип — не отпускает
+        if (mech('dom') && s.dom?.ts != null && P.stuck(s, P.dominant(P.eff(s, off), s.base, s.dom.id), nowStamp().ts)) {
+            out.strainIn += 0.4; out.stuck = true; out.list.push({ id: 'loop', text: 'мысли ходят по кругу — не отпускает' });
+        }
         if (num(s.jeal) >= 15) out.list.push({ id: 'jeal', text: `ревность${s.jealTo ? ` (${short(s.jealTo)})` : ''}: ${Math.round(s.jeal)}` });
         // свой человек рядом — и между ними не накопилось: отпускает (но не когда сам за него боится)
         if (mech('lens')) {
@@ -501,7 +511,8 @@ function afterPost(i, j, msg) {
                 // рядом свой человек — чужая угроза переносится легче
                 if (h.threat && hv && !(by && A.sameName(by, hv.to))) { L.kmul.threat = (L.kmul.threat ?? 1) * hv.threat; L.tags.push('haven'); }
             }
-            const d = { ...P.hit(s, h, t, { raw: sig.raw, kmul: L.kmul, kmood: L.kmood }), ...driveHit(s, h, t) };
+            if (sig.giddy > 1) for (const k of ['fun', 'win']) if (h[k]) L.kmul[k] = (L.kmul[k] ?? 1) * sig.giddy;
+            const d = { ...P.hit(s, h, t, { raw: sig.raw, kmul: L.kmul, kmood: L.kmood, drain: sig.drain }), ...driveHit(s, h, t) };
             const bad = Object.keys(h).some(k => P.NEGATIVE.includes(k));
             if (h.rival) { P.jealUp(s, h.rival, L.kmul.rival ?? 0.5); s.jealTo = bond?.to || by || ''; }
             P.roleHit(s, h, n.day);
@@ -571,12 +582,12 @@ function afterPost(i, j, msg) {
             P.spend(s, g.cost);
             log(s, { mes: i, src: 'init', why: `сам сделал шаг (${INIT_NAME[sp.kind] || 'инициатива'}): воля −${g.cost}` });
         }
-        if (there) P.holdCost(s, dom);
+        if (there) P.holdCost(s, dom, sig.drain);
         if (cfg().brk !== false && there) {
             // сработавший триггер сам по себе не «острый» срыв: его эпизод играет модуль триггеров
             const kind = P.breakCheck(s, E, said);
             if (kind) {
-                s.brk = { mes: i, ts: n.ts, kind, why: why || s.why?.t || '' };
+                s.brk = { mes: i, ts: n.ts, kind, why: why || s.why?.t || '', emo: dom.id || '' };
                 if (s.brk.why) P.mark(s, { mes: i, day: n.day, t: `сорвался: ${s.brk.why}`, emo: NEG.includes(dom.id) ? dom.id : 'low', w: 3 });
                 log(s, { mes: i, src: 'brk', why: kind === 'acute' ? 'срыв: удар в больное' : 'срыв: накопилось, держать нечем' });
                 const name = A.canonName(who);
@@ -607,9 +618,13 @@ function afterPost(i, j, msg) {
         const src = done.find(b => b !== a && b.there && b.dom.id && b.dom.step >= 2 && close(a.who, b.who, 50));
         if (!src) continue;
         if (NEG.includes(src.dom.id)) {
-            a.s.fast.aro = P.clamp(a.s.fast.aro + 6, -150, 150);
-            a.s.fast.val = P.clamp(a.s.fast.val - 4, -150, 150);
-            a.s.strain = P.clamp(a.s.strain + 2, 0, 100);
+            // сцепка плохого настроения сильнее в парах, где накопилось, и слабее там, где друг другу опора
+            // (Saxbe, Repetti, 2010: чем теснее связаны кортизол и дурное настроение супругов, тем ниже довольство браком)
+            const b = mech('lens') ? bondTo(a.who, src.who, a.s, P.eff(a.s)) : null;
+            const k = b ? (b.t.sour >= 0.5 ? 1.5 : b.st.haven >= 50 ? 0.5 : 1) : 1;
+            a.s.fast.aro = P.clamp(a.s.fast.aro + 6 * k, -150, 150);
+            a.s.fast.val = P.clamp(a.s.fast.val - 4 * k, -150, 150);
+            a.s.strain = P.clamp(a.s.strain + 2 * k, 0, 100);
         } else a.s.fast.val = P.clamp(a.s.fast.val + 5, -150, 150);
         log(a.s, { mes: i, src: 'near', why: `рядом ${short(src.who)} (${domLabel(src.dom)}) — передаётся` });
     }
@@ -764,6 +779,9 @@ cass — кассеты: КАК ИМЕННО ОН ведёт себя на ка�
 fix — 3–6 вещей, которые возвращают его в себя, когда плохо (по 1–4 слова, из лорбука: голос близкого, счёт вслух, дело для рук, холодная вода…). beliefs — 1–3 глубинных убеждения о себе, с которыми он живёт и которые мешают принимать хорошее: t — его словами, 2–6 слов («я испорченный»); truth — что станет его правдой, если убеждение сломается, 3–10 слов. dates — дни в году, которые он помнит телом (годовщина гибели, день, когда всё сломалось): md — месяц и день «ММ-ДД», t — что это за день, 2–6 слов, kind — loss (утрата) или blow (вина, стыд). Только если в записях есть точные день и месяц; не выдумывай — иначе [].
 want — насколько ему нужна каждая потребность, от 0.6 до 1.5 (1 — как всем): bond — близость и прикосновения; safe — безопасность и контроль над обстановкой; free — свобода решать самому; need — быть нужным и полезным; quiet — тишина и покой от людей (выше у замкнутых); novel — новизна и движение (выше у тех, кому скучно в покое).`;
 
+const STORY_RULE = `
+Тебе дан «Свод всей истории» — что с ним было и как он себя вёл на самом деле. Он важнее общих слов карточки: кассеты пиши с его настоящих жестов и фраз из истории; fix — то, что его на деле успокаивало; beliefs — то, что он о себе говорил и чем жил; sens и base — по тому, что его по-настоящему ранило и каким он был в спокойные дни, а не в последней сцене; dates — и дни из самой истории, которые он будет помнить телом (утрата, день, когда чуть не потерял близкого). Разовое состояние последних дней за характер не принимай.`;
+
 async function collect(who) {
     const name = A.canonName(who);
     const L = A.lore || {};
@@ -774,7 +792,12 @@ async function collect(who) {
     try { lore = (await L.about?.(name, { max: 12000 })) || ''; } catch { /* */ }
     if (!card && !lore && !core) throw new Error('ни карточки, ни лорбука о нём не нашлось');
     const usr = [`Персонаж: ${name}`, core ? `Ядро характера:\n${core}` : '', card ? `Карточка:\n${card}` : '', lore ? `Лорбук:\n${lore}` : ''].filter(Boolean).join('\n\n');
-    const j = await A.askJson([{ role: 'system', content: COLLECT_SYS }, { role: 'user', content: usr }], 3400, { check: (x) => !!x && typeof x === 'object' && (!!x.cass || !!x.base), what: 'Темперамент' });
+    // есть свод всей истории (Life 0.59) — он идёт в запрос, а считает умная модель: кассеты и больные места берутся
+    // из того, как человек на самом деле вёл себя за всю историю, а не из последних постов и общих слов карточки
+    const whole = safe(() => !!A.story?.ready(), false);
+    const check = { check: (x) => !!x && typeof x === 'object' && (!!x.cass || !!x.base), what: 'Темперамент' };
+    const msgs = [{ role: 'system', content: COLLECT_SYS + (whole ? STORY_RULE : '') }, { role: 'user', content: usr }];
+    const j = whole && A.askFillJson ? await A.askFillJson(msgs, 7000, check, { who: name, max: 18000 }) : await A.askJson(msgs, 3400, check);
     const old = temperOf(name);
     const t = editTemper(name, (x) => {
         for (const a of P.AXES) x.base[a] = Math.round(P.clamp(j.base?.[a] ?? x.base[a], -30, 30));
@@ -792,6 +815,7 @@ async function collect(who) {
         if (!x.dates.length) x.dates = arr(j.dates);
         x.note = str(j.note, 400);
         x.src = 'lore';
+        x.story = whole;       // собран со сводом всей истории
     });
     cfg().prof[keyOf(name)] = P.normTemper(t);
     saveCfg();
@@ -799,7 +823,25 @@ async function collect(who) {
     const s = stateOf(name);
     for (const a of P.AXES) s.base[a] = P.clamp(s.base[a] + (t.base[a] - old.base[a]), -100, 100);
     saveM();
+    backfill(name);
     return temperOf(name);
+}
+
+/**
+ * Память с чувством — задним числом: что человек пережил за ВСЮ историю (из свода Life), ложится метками,
+ * чтобы старое могло всплывать, а не только случившееся после установки мозга. Запросов к модели нет.
+ */
+function backfill(who) {
+    const felt = safe(() => A.story?.felt?.(who, 2) || [], []);
+    const s = stateOf(who);
+    if (!felt.length) return 0;
+    let n = 0;
+    // сильное — всё; заметное — последние: в памяти сорок мест, и слабое с давним она вытесняет сама
+    const pick = [...felt.filter(f => f.w >= 3), ...felt.filter(f => f.w === 2).slice(-14)].sort((a, b) => a.mes - b.mes);
+    for (const f of pick) if (P.mark(s, { mes: Math.max(0, num(f.mes)), day: f.day, t: f.t, emo: f.emo, w: f.w })) n++;
+    s.filled = true;
+    saveM();
+    return n;
 }
 
 let ensuring = false;
@@ -811,13 +853,17 @@ async function ensure() {
         for (const who of list()) {
             const k = keyOf(who);
             const c = cfg();
-            if (c.prof[k]?.src && c.prof[k].src !== 'auto') continue;
+            const whole = safe(() => !!A.story?.ready(), false);
+            if (whole && !stateOf(who).filled) safe(() => backfill(who));
+            // собран по карточке без свода, а свод с тех пор появился — один раз пересобрать по всей истории (руками правленое не трогаем)
+            const redo = whole && c.prof[k]?.src === 'lore' && !c.prof[k].story;
+            if (c.prof[k]?.src && c.prof[k].src !== 'auto' && !redo) continue;
             if (Date.now() - num(c.tried[k]) < 6 * 36e5) continue;
             c.tried[k] = Date.now();
             saveCfg();
             try {
                 await collect(who);
-                A.toast('success', `${esc(short(who))}: темперамент и кассеты собраны по карточке и лорбуку. Посмотреть и поправить — Сцена → ${TITLE}.`, TITLE, { timeOut: 6000, escapeHtml: false });
+                A.toast('success', `${esc(short(who))}: темперамент и кассеты собраны ${temperOf(who).story ? 'по всей истории, карточке и лорбуку' : 'по карточке и лорбуку'}. Посмотреть и поправить — Сцена → ${TITLE}.`, TITLE, { timeOut: 6000, escapeHtml: false });
                 safe(() => A.updatePrompt());
                 refresh();
             } catch (e) { console.warn(`[Мозг] темперамент ${who}`, e); }
@@ -953,11 +999,13 @@ const range = (who, k, val, min, max, step, label, hint = '') => `<div class="br
 const dm = (md) => { const [m, d] = String(md).split('-'); return `${d}.${m}`; };
 
 function temperHtml(who, t) {
-    const srcName = { auto: 'обычный человек — ещё не собран', lore: 'собран по карточке и лорбуку', hand: 'поправлен руками' }[t.src];
+    const whole = safe(() => !!A.story?.ready(), false);
+    const srcName = { auto: 'обычный человек — ещё не собран', lore: t.story ? 'собран по всей истории, карточке и лорбуку' : 'собран по карточке и лорбуку', hand: 'поправлен руками' }[t.src];
     const area = (bin, k, rows, val, ph = '') => `<textarea rows="${rows}" data-bin="${bin}" data-k="${k}" data-who="${esc(who)}" placeholder="${esc(ph)}">${esc(val)}</textarea>`;
     return `<details class="lf-more brn-more" ${det('t')}><summary>Темперамент и кассеты — ${srcName}</summary>
         ${t.note ? `<div class="lf-hint">${esc(t.note)}</div>` : ''}
-        <button class="lf-btn full" data-bact="collect" data-who="${esc(who)}">${A.icon ? A.icon('refresh') : ''} Собрать из карточки и лорбука</button>
+        <button class="lf-btn full" data-bact="collect" data-who="${esc(who)}">${A.icon ? A.icon('refresh') : ''} ${whole ? 'Собрать по всей истории' : 'Собрать из карточки и лорбука'}</button>
+        ${whole ? '' : `<div class="lf-hint">Свод всей истории ещё не собран (Life → Мир → Свод): пока темперамент пишется только по карточке и лорбуку. Со сводом кассеты берутся из того, как он на самом деле вёл себя за всю историю, а пережитое ложится в память с чувством.</div>`}
         ${A.sec('В спокойный день')}
         ${P.AXES.map(a => range(who, `base.${a}`, t.base[a], -45, 45, 1, `${AX_NAME[a][0]} ↔ ${AX_NAME[a][1]}`)).join('')}
         ${A.sec('Как устроен')}
@@ -1095,7 +1143,7 @@ function applyOp(s, t, op) {
         if (s.night) s.night.bad = false;
         log(s, { mes, src: 'hand', why: 'отдых: воля +40, напряжение −30' });
     }
-    if (op.act === 'reset') Object.assign(s, P.fresh(t), { at: nowStamp(), night: null, why: null, belBroke: null, recall: null, hurtBy: null, heldDay: null, jealTo: '', feed: {}, dr: freshDrives() });
+    if (op.act === 'reset') Object.assign(s, P.fresh(t), { at: nowStamp(), night: null, why: null, belBroke: null, recall: null, hurtBy: null, heldDay: null, jealTo: '', feed: {}, drf: {}, filled: false, dr: freshDrives() });
     if (op.act === 'feed' && P.DRIVES.includes(op.k)) { healDrives(s); s.dr[op.k] = P.clamp(s.dr[op.k] + num(op.d), 0, 100); }
     if (op.act === 'unmark') s.marks = s.marks.filter(x => x.id !== op.id);
     if (op.act === 'unbrk' && s.brk) {

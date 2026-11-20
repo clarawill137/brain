@@ -26,7 +26,7 @@ const D_HIT = {
     wrong: { safe: -0.4, bond: -0.4 },
     loss: { bond: -1.2 },
     rival: { bond: -0.6, safe: -0.5, need: -0.4 },
-    held: { free: -0.25 },
+    held: { free: -0.25, bond: -0.3 },     // подавление стоит близости: рядом с тем, кто держит лицо, её меньше обоим
     open: { bond: 0.6, free: 0.2 },
 };
 
@@ -58,6 +58,10 @@ export function driveHit(s, hits, temper) {
             d[dr] = (d[dr] || 0) + x;
         }
     }
+    // ущемление: потребность не просто давно не кормили — её активно придавили. По теории самодетерминации
+    // (Vansteenkiste, Ryan, 2013) это отдельное и более сильное состояние: защита, упрямство, поиск замены
+    if (!s.drf || typeof s.drf !== 'object') s.drf = {};
+    for (const [k, x] of Object.entries(d)) if (x < 0) s.drf[k] = Math.min(1, num(s.drf[k]) + Math.abs(x) / 25);
     for (const k of Object.keys(d)) d[k] = Math.round(d[k]);
     return d;
 }
@@ -85,6 +89,7 @@ export function driveDecay(s, hours, temper, ctx = {}) {
     if (crowd >= 4) s.dr.quiet -= 6 * want('quiet') * h;
     else s.dr.quiet += (crowd && crowd <= 2 ? 5 : 2) * h;
     s.dr.novel -= 0.15 * want('novel') * h;      // неделя с лишним без нового — и рутина начинает давить
+    if (s.drf) for (const k of Object.keys(s.drf)) { s.drf[k] = num(s.drf[k]) * Math.pow(0.5, h / 12); if (s.drf[k] < 0.05) delete s.drf[k]; }
     for (const k of DRIVES) s.dr[k] = clamp(s.dr[k], 0, 100);
     return s;
 }
@@ -111,7 +116,9 @@ export function combos(v) {
     const s = healDrives(v.s);
     const dr = s.dr, dom = v.dom || { id: '', step: 0 };
     const band = willBand(s.will);
-    const lack = (k, edge = 35) => Math.max(0, (edge - dr[k]) / edge);     // 0…1: насколько голоден
+    // 0…1: насколько голоден — или насколько потребность только что ущемили (заметный удар по ней считается сразу)
+    const hurt = (k) => (num(s.drf?.[k]) >= 0.6 ? 0.6 * num(s.drf[k]) : 0);
+    const lack = (k, edge = 35) => Math.max(0, (edge - dr[k]) / edge, hurt(k));
     const is = (id, step = 1) => dom.id === id && dom.step >= step;
     const neg = NEG.includes(dom.id);
     const out = [];
@@ -157,8 +164,9 @@ export function combos(v) {
     const J = { open: 'ревнует в открытую: колет, метит своё место рядом, встаёт между', quiet: 'ревнует молча: считает, что соперник лучше, отступает на шаг и смотрит со стороны', cling: 'ревнует тревожно: держится ближе, переспрашивает, ищет подтверждения, что место рядом никто не занял' };
     if (J[v.jeal]) add('jealous', 0.9 + num(s.jeal) / 200, J[v.jeal]);
     // от своего человека прилетело: тянуться или закрыться
-    if (v.hurt === 'mend') add('mend', 0.7, 'задело, но сердиться долго не выходит: ищет повод помириться, не дожидаясь шага навстречу');
-    else if (v.hurt === 'guard') add('shut', 0.8, 'задело от своего человека — закрывается и отступает раньше, чем оттолкнут');
+    // то, что между ними случилось только что, важнее фоновой нехватки — поэтому вес выше
+    if (v.hurt === 'mend') add('mend', 0.95, 'задело, но сердиться долго не выходит: ищет повод помириться, не дожидаясь шага навстречу');
+    else if (v.hurt === 'guard') add('shut', 1.1, 'задело от своего человека — закрывается и отступает раньше, чем оттолкнут');
     // роль сильного
     if (v.role === 2) add('crack', 0.95, 'слишком долго держит лицо: роль трещит — срывается на мелочах или вдруг выдаёт правду, о которой молчит неделями');
     else if (v.role === 1) add('worn', 0.45, 'сил быть тем, кто держится, всё меньше: отвечает «нормально» раньше, чем спросили');

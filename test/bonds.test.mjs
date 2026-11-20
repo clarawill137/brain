@@ -183,3 +183,55 @@ test('поручень: одно событие через линзу любви
         assert.ok(P.dominant(P.eff(s2), s2.base).step <= 2, `${k} 2 от любимого → ступень ${P.dominant(P.eff(s2), s2.base).step}`);
     }
 });
+
+// ───── 0.6: поправки по исследованиям ─────
+
+test('держать лицо: у отдохнувшего дешевле, у вымотанного дороже; чистого «истощения воли» почти нет', () => {
+    const t = T();
+    const a = mk(t), b = mk(t), c = mk(t);
+    P.hit(a, { held: 2 }, t, { drain: 0.8 }); P.hit(b, { held: 2 }, t); P.hit(c, { held: 2 }, t, { drain: 1.5 });
+    assert.ok(a.will > b.will && b.will > c.will, `${a.will} > ${b.will} > ${c.will}`);
+    const dom = { id: 'shame', lvl: 80, step: 3 };
+    assert.ok(P.holdCost(mk(t), dom, 0.8) < P.holdCost(mk(t), dom, 1.5));
+});
+
+test('эмоциональная инерция: при низкой самооценке плохое настроение держится дольше, хорошее — как у всех', () => {
+    const t = T();
+    const a = mk(t), b = mk(t);
+    a.mood.val = -40; b.mood.val = -40; b.mood.wor = -60;
+    P.decay(a, 10, t); P.decay(b, 10, t);
+    assert.ok(b.mood.val < a.mood.val - 2, `${b.mood.val} против ${a.mood.val}`);
+    const c = mk(t), d = mk(t);
+    c.mood.val = 40; d.mood.val = 40; d.base.wor = -45;
+    P.decay(c, 10, t); P.decay(d, 10, t);
+    assert.ok(Math.abs(c.mood.val - d.mood.val) < 0.6, 'тепло уходит одинаково');
+});
+
+test('выплеснутая злость не разряжает: после срыва в злости напряжение остаётся высоким', () => {
+    const t = T();
+    const a = mk(t), b = mk(t);
+    for (const s of [a, b]) { s.strain = 95; s.fast.aro = 40; }
+    a.brk = { mes: 1, emo: 'anger' }; b.brk = { mes: 1, emo: 'low' };
+    P.resolveBreak(a, { ts: 0, mes: 2 }); P.resolveBreak(b, { ts: 0, mes: 2 });
+    assert.equal(a.strain, 72); assert.equal(b.strain, 55);
+    assert.equal(a.fast.aro, 40, 'взвод не упал'); assert.equal(b.fast.aro, 0);
+    assert.ok(a.hang && b.hang && !a.brk && !b.brk);
+});
+
+test('ущемление сильнее нехватки: придавленная потребность отзывается сразу, а не когда шкала опустеет', () => {
+    const t = T();
+    const s = mk(t);
+    D.driveHit(s, { bound: 2 }, t);
+    assert.ok(s.dr.free > 35, `шкала ещё не пустая: ${s.dr.free}`);
+    assert.ok(s.drf.free >= 0.6);
+    assert.ok(D.combos({ s, dom: { id: 'anger', step: 1 } }).some(c => c.id === 'rebel'));
+    assert.ok(D.combos({ s, dom: { id: '', step: 0 } }).some(c => c.id === 'chafe'));
+    D.driveDecay(s, 36, t, {});
+    assert.ok(!D.combos({ s, dom: { id: '', step: 0 } }).some(c => c.id === 'chafe'), 'через полтора дня отпустило');
+    // слабый удар — не ущемление
+    const s2 = mk(t); D.driveHit(s2, { bound: 1 }, t);
+    assert.ok(!D.combos({ s: s2, dom: { id: '', step: 0 } }).some(c => c.id === 'chafe'));
+    // держит лицо — близость до него не доходит
+    const s3 = mk(t); const b0 = s3.dr.bond; D.driveHit(s3, { held: 2 }, t);
+    assert.ok(s3.dr.bond < b0);
+});

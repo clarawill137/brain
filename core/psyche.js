@@ -174,12 +174,16 @@ export function decay(s, hours, temper, load = {}) {
     if (h > 0) {
         const kf = Math.pow(0.5, h / FAST_HL);
         const km = Math.pow(0.5, h / (MOOD_HL / t.recover));
+        // эмоциональная инерция (Kuppens и др., 2010): у кого с самооценкой плохо, плохое настроение переносится
+        // из часа в час упорнее — «починка настроения» работает хуже. До +40% к сроку, только для минуса.
+        const inert = 1 + 0.4 * clamp((-(s.base.wor + s.mood.wor) - 15) / 60, 0, 1);
+        const kmNeg = Math.pow(0.5, h / (MOOD_HL / t.recover * inert));
         for (const a of AXES) {
             // характер медленно тянется за тем, чем он живёт
             const drift = s.mood[a] * Math.min(0.5, h * BASE_DRIFT);
             s.base[a] = clamp(s.base[a] + drift, t.base[a] - BASE_SPAN, t.base[a] + BASE_SPAN);
             s.fast[a] *= kf;
-            s.mood[a] *= km;
+            s.mood[a] *= s.mood[a] < 0 ? kmNeg : km;
         }
         // напряжение: приток против естественного спада — к равновесию
         const k = Math.LN2 / (STRAIN_HL / t.recover);
@@ -249,7 +253,8 @@ export function hit(s, hits, temper, opts = {}) {
             d[a] += x;
         }
         d.strain += H.strain * m;
-        d.will += H.will * u * (H.will > 0 ? t.grit : 1);
+        // цена «сдержался»: у отдохнувшего меньше, у вымотанного больше (opts.drain) — см. holdCost
+        d.will += H.will * u * (H.will > 0 ? t.grit : clamp(opts.drain ?? 1, 0.5, 1.6));
         const lv = Math.round(clamp(n, 0, 3));
         if (k === 'held') d.mask += MASK_UP[lv];
         if (k === 'open') d.mask -= MASK_DOWN[lv];
@@ -262,9 +267,9 @@ export function hit(s, hits, temper, opts = {}) {
 }
 
 /** Держать лицо под сильным чувством стоит воли — за каждый ответ, где он в сцене. */
-export function holdCost(s, dom) {
+export function holdCost(s, dom, drain = 1) {
     if (!dom?.id || !['fear', 'anger', 'shame', 'low'].includes(dom.id)) return 0;
-    const c = Math.max(0, dom.lvl - 45) * 0.12;
+    const c = Math.max(0, dom.lvl - 45) * 0.12 * clamp(drain, 0.5, 1.6);
     s.will = clamp(s.will - c, 0, 100);
     return r1(c);
 }
@@ -372,11 +377,13 @@ export function breakCheck(s, E, hits = {}) {
 
 /** Срыв прожит: напряжение вышло, сил нет, тяжёлый осадок — «похмелье» на hours часов истории. */
 export function resolveBreak(s, now = {}, hours = 10) {
-    s.strain = Math.min(s.strain, 55);
+    // выплеснутая злость не разряжает (метаанализ Kjærvik и Bushman, 2024: «выпустить пар» злость не снижает,
+    // снижает то, что успокаивает тело): после срыва в злости напряжение остаётся высоким и взвод не падает
+    const hot = s.brk?.emo === 'anger';
+    s.strain = Math.min(s.strain, hot ? 72 : 55);
     s.will = Math.min(s.will, 25);
     s.mood.val = clamp(s.mood.val - 22, -120, 120);
-    s.mood.aro = clamp(s.mood.aro - 12, -120, 120);
-    s.fast.aro = Math.min(s.fast.aro, 0);
+    if (!hot) { s.mood.aro = clamp(s.mood.aro - 12, -120, 120); s.fast.aro = Math.min(s.fast.aro, 0); }
     s.hang = { until: now.ts != null ? now.ts + hours * 3.6e6 : null, mes: num(now.mes), n: 0 };
     s.brk = null;
     s.role = 0; s.heldDay = null;      // сорвался — роль сильного больше не держит
@@ -576,9 +583,14 @@ export function mark(s, m) {
  * Что всплывает в тон тому, что он чувствует сейчас: метка с тем же чувством (или хотя бы того же знака),
  * не свежая (старше gap постов) и не всплывавшая недавно (cool постов). Тяжёлое — раньше. null — ничего.
  */
+const RECALL_AX = { fear: 'ctl', anger: 'val', shame: 'wor', low: 'val' };
 export function pickRecall(s, dom, lastI, gap = 20, cool = 25) {
-    if (!dom?.id || dom.step < 2) return null;
+    if (!dom?.id) return null;
     const fam = FAMILY[dom.id];
+    // метаанализы памяти в тон настроению (Matt, Vázquez, Campbell, 1992): в обычном состоянии перевес у хорошего,
+    // симметрия и перевес плохого — у подавленных. Поэтому хорошее всплывает уже с первой ступени, а плохое —
+    // только когда тяжёлым стало само настроение (или чувство дошло до третьей ступени), не от одной вспышки
+    if (fam === 'pos' ? dom.step < 1 : !(dom.step >= 3 || (dom.step >= 2 && num(s.mood?.[RECALL_AX[dom.id]]) <= -10))) return null;
     const pool = s.marks.filter(x => FAMILY[x.emo] === fam && lastI - x.mes >= gap && (x.r == null || lastI - x.r >= cool));
     if (!pool.length) return null;
     return pool.sort((a, b) => (b.emo === dom.id) - (a.emo === dom.id) || b.w - a.w || b.mes - a.mes)[0];
