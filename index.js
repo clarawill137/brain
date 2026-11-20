@@ -10,11 +10,12 @@ import { EMO_NAME, EMO_TITLE, EMO_ICON, WILL_TEXT, WILL_NAME, SINGLES, SINGLE_TI
 import { DRIVE_NAME, DRIVE_ICON, BAND_NAME, freshDrives, healDrives, driveHit, driveDecay, driveBand, combos } from './core/drives.js';
 import { hints } from './core/hints.js';
 import { SOFT, tie, pairStats, lens, haven, afterHurt, stayStyle, grudgeDecay } from './core/bonds.js';
+import { SPANS, SAND_MAX, sandNew, sandOther, sandView, sandInner, sandSeen, sandApply, sandPush, sandEdit, sandSet, sandScript } from './core/sandbox.js';
 import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, ROM_NAME, tropeMul, ownSide, sideOf, tropeText, pairLine, wedNorm, wedSpan, wedDay, kidNorm, kidSpan, rejectOf, SPINE_KEYS, SPINE_NAME, hasSpine, spineLine } from './core/attach.js';
 import { STAGE_NAME, stageOf, tolOf, drink, sober, boozeNow, DRUNK, HUNG, SEEN, SEEN_HUNG, playerTips } from './core/booze.js';
 import { KINDS, KIND_NAME as CHEM_NAME, KIND_ICON as CHEM_ICON, STAGE as CHEM_STAGE, AFTER as CHEM_AFTER, stageOf as chemStage, chemTol, take, wear, chemStages, chemNow, chemLines, seenLines, chemTips } from './core/chem.js';
 
-const VERSION = '0.16.0';
+const VERSION = '0.17.0';
 const ID = 'brain';
 const TITLE = '🧠 Мозг';
 const NARR = /рассказчик|narrator|мастер|game ?master|(^|[^a-z])gm([^a-z]|$)|мнемозина/i;
@@ -1434,6 +1435,119 @@ own — кто к кому УЖЕ привязан намертво (что бы
 
 const OWN_CHECK_SYS = `Ты перепроверяешь чужую расстановку для «код-мозга» ролевой истории. Ниже — утверждения «один держится за другого намертво» с фактом, на который каждое опирается, и тексты, по которым их ставили (карточки, лорбуки и свод всей истории, если он дан). «Намертво» — значит, что бы ни случилось, не отвернётся и простит что угодно: за этим годы и общая беда, а не симпатия, не долг службы и не первая влюблённость. Суди на дату чата: будущее сюда не переноси. Для каждого утверждения реши, подтверждают ли его тексты. Сомневаешься — false. Ответь только одним JSON: {"ok":[true,false]} — по порядку утверждений, значений столько же, сколько утверждений.`;
 
+// ───────────── Песочница: два героя играют сцену без игрока ─────────────
+// Игрок — режиссёр: задаёт место, обстоятельства, кто начинает, скрытые мотивы и события извне; смотрит ходы, видит,
+// что у каждого внутри и что герой думает на самом деле; может поправить ход руками и вмешаться в любой момент.
+// Состояние героев берётся копией из чата и обратно не возвращается: настоящая история от песочницы не меняется.
+const KINDS_TEXT = (() => { const line = RULE.split('\n').find(l => l.includes('warm — ')) || ''; const a = line.indexOf('warm — '), b = line.indexOf('. Оценивай'); return a >= 0 ? line.slice(a, b > a ? b : undefined) : ''; })();
+const SAND_SYS = () => `Ты ведёшь «песочницу» код-мозга ролевой истории: два героя играют сцену без игрока, игрок — режиссёр и только смотрит. Напиши ОДИН ход за героя, названного в конце сообщения: 90–180 слов, литературная проза в третьем лице, плавные связные предложения — что он делает и что говорит. За второго героя не пиши ни действий, ни слов, ни мыслей. Что у героя внутри, посчитано кодом и дано тебе словами: играй из этого, а цифр и названий состояний не произноси. Скрытый мотив героя (если дан) второму неизвестен: он виден только в поведении, вслух не называется. Событие извне (если дано) происходит в этом ходе и видно обоим. Сцену не завершай и не подводи итог: ход кончается так, чтобы второму было на что ответить.
+Ответь только одним JSON по-русски:
+{"text":"ход","thought":"что он на самом деле думает и чего не скажет вслух, 8–20 слов","psy":[{"who":"имя","by":"имя","blow":2,"why":"из-за чего, 3–10 слов"}]}
+psy — что ЭТОТ ход сделал с внутренним состоянием каждого из двоих: и того, кто говорил, и того, кому сказано; ни с кем ничего — []. В строке — только ненулевые шкалы, каждая от 1 до 3 (1 — слегка, 2 — заметно, 3 — по-настоящему сильно; 3 ставь редко): ${KINDS_TEXT}. Оценивай то, что случилось с человеком, а не то, как он это показал. by — от кого это пришло. Имена пиши ровно так, как они даны.`;
+/** Что нужно знать о герое для сцены: карточка покороче, способ, пара, стержень. */
+async function sandWho(name, other) {
+    let src = '';
+    try { src = (await sourcesOf(name, { cardMax: 2600, loreMax: 2600 })).slice(0, 5200); } catch { /* карточки нет — сыграет по имени */ }
+    const t = temperOf(name);
+    const style = mech('style') ? styleId(t.attach) : '';
+    const pr = mech('style') ? pairOf(name, other) : null;
+    const bits = [
+        style ? `привязывается так: ${STYLES[style].name} — ${STYLES[style].how}` : '',
+        pr ? pairLine(pr, short(other), { side: sideOf(pr, name, A.sameName), today: isoToday(), style }) : '',
+        mech('spine') && hasSpine(t.spine) ? spineLine(t.spine, 'calm') : '',
+    ].filter(Boolean);
+    return `${src}${bits.length ? `\n\nПостоянное в нём: ${bits.join('; ')}.` : ''}`;
+}
+const sandOf = () => (M().sand && Array.isArray(M().sand.cast) && M().sand.st ? M().sand : null);
+const sandForm = () => (M().sandForm = M().sandForm && typeof M().sandForm === 'object' ? M().sandForm : {});
+/** Начать сцену по тому, что вписано в пульт режиссёра. */
+function sandStart() {
+    const f = sandForm();
+    const all = list();
+    const a = all.find(n => A.sameName(n, f.a)) || all[0];
+    const b = all.find(n => A.sameName(n, f.b) && !A.sameName(n, a)) || all.find(n => !A.sameName(n, a));
+    if (!a || !b) throw new Error('для песочницы нужны двое героев с психикой');
+    const sb = sandNew({
+        a, b, place: f.place, setup: f.setup, opening: f.opening, first: A.sameName(f.first, b) ? b : a,
+        motive: { [a]: { t: f.ma, left: f.mal }, [b]: { t: f.mb, left: f.mbl } },
+        cond: { [a]: f.ca, [b]: f.cb },
+        event: { t: f.ev, left: f.evl },
+    }, { [a]: stateOf(a), [b]: stateOf(b) });
+    M().sand = sb;
+    saveM();
+    return sb;
+}
+/** Один ход: модель пишет его и говорит, что он сделал с обоими; код считает, что с каждым стало. */
+async function sandTurn() {
+    const sb = sandOf();
+    if (!sb) throw new Error('сцена не начата');
+    if (sb.turns.length >= SAND_MAX) throw new Error(`в сцене уже ${SAND_MAX} ходов — начни новую`);
+    const who = sb.next, other = sandOther(sb, who);
+    const tw = temperOf(who), to = temperOf(other);
+    const cards = sb.cards || (sb.cards = { [who]: await sandWho(who, other), [other]: await sandWho(other, who) });
+    const usr = [
+        `Герои: ${sb.cast.join(' и ')}. ${whenLine()}`,
+        `Место: ${sb.place || 'не задано — выбери по обстоятельствам'}. Обстоятельства: ${sb.setup || 'разговор наедине'}.`,
+        sb.turns.length ? '' : (sb.opening ? `Сцена начинается с того, что: ${sb.opening}.` : 'Это первый ход сцены.'),
+        `———\n${cards[who]}\n\n———\n${cards[other]}`,
+        sb.turns.length ? `———\nЧто уже было (последние ходы):\n${sandScript(sb, short)}` : '',
+        `———\nХод за: ${who}.`,
+        `Что у него внутри сейчас: ${sandInner(sb.st[who], tw)}.`,
+        sb.cond[who] ? `Условие: ${sb.cond[who]}.` : '',
+        sb.motive[who] ? `Скрытый мотив (второму неизвестен): ${sb.motive[who].t}.` : '',
+        `${short(other)} со стороны: ${sandSeen(sb.st[other], to)}${sb.cond[other] ? `; ${sb.cond[other]}` : ''}.`,
+        sb.event ? `Событие извне в этом ходе: ${sb.event.t}.` : '',
+    ].filter(Boolean).join('\n');
+    const j = await askSmart([{ role: 'system', content: SAND_SYS() }, { role: 'user', content: usr }], 1200, { check: (x) => !!x && typeof x.text === 'string' && x.text.trim().length > 20, what: 'Ход песочницы' });
+    const text = str(j?.text, 2400);
+    if (text.length < 20) throw new Error('модель не написала ход');
+    const kmul = (n, from, hits) => { const pr = mech('style') ? pairOf(n, from) : null; return pr && TROPES[pr.id] ? tropeMul(pr.id, hits) : {}; };
+    const fx = sandApply(sb, who, arr(j.psy), { [who]: tw, [other]: to }, { same: A.sameName, kmul });
+    sandPush(sb, who, text, j.thought, fx);
+    saveM();
+    return sb;
+}
+const SPAN_NAME = { 1: 'на 1 ход', 3: 'на 3 хода', 5: 'на 5 ходов', 999: 'до конца сцены' };
+/** Лист: пульт режиссёра, ходы и что с каждым стало. */
+function sandHtml() {
+    const all = list();
+    if (all.length < 2) return '';
+    const sb = sandOf();
+    const f = sandForm();
+    const opt = (val, cur, label) => `<option value="${esc(val)}"${val === cur ? ' selected' : ''}>${esc(label)}</option>`;
+    const inp = (k, ph, val = f[k]) => `<input type="text" data-bin="sand" data-k="${k}" value="${esc(val || '')}" placeholder="${esc(ph)}">`;
+    const spanSel = (k) => `<select data-bin="sand" data-k="${k}" aria-label="На сколько ходов">${SPANS.map(n => opt(String(n), String(f[k] || 3), SPAN_NAME[n])).join('')}</select>`;
+    const a = all.find(n => A.sameName(n, f.a)) || all[0];
+    const b = all.find(n => A.sameName(n, f.b) && !A.sameName(n, a)) || all.find(n => !A.sameName(n, a));
+    const who = (k, cur) => `<select data-bin="sand" data-k="${k}" aria-label="Герой">${all.map(n => opt(n, cur, short(n))).join('')}</select>`;
+    const chip = (v) => `<span class="lf-chip">${esc(v.name)}</span><span class="lf-chip">воля ${v.will}</span><span class="lf-chip">напряжение ${v.strain}</span>${v.mask >= 20 ? `<span class="lf-chip">несказанное ${v.mask}</span>` : ''}${v.brk ? '<span class="lf-chip">срыв</span>' : ''}`;
+    let inner;
+    if (!sb) {
+        inner = `<div class="lf-hint">Двое героев играют сцену без тебя; ты — режиссёр. Их состояние берётся копией из чата и обратно не возвращается: настоящая история от песочницы не меняется. Каждый ход — один запрос ${smartName() ? `умной модели (${esc(smartName())})` : 'модели Летописца (умная в Life не выбрана)'}.</div>
+            <div class="brn-sand-row">${who('a', a)}${who('b', b)}</div>
+            <div class="lf-field"><label>Место</label>${inp('place', 'кухня ночью, крыша, лазарет…')}</div>
+            <div class="lf-field"><label>Обстоятельства</label>${inp('setup', 'разговор наедине, засада, после ссоры…')}</div>
+            <div class="lf-field"><label>Кто начинает и с чего</label><div class="brn-sand-row">${who('first', A.sameName(f.first, b) ? b : a)}${inp('opening', 'первое действие — можно оставить пустым')}</div></div>
+            ${[[a, 'ma', 'mal', 'ca'], [b, 'mb', 'mbl', 'cb']].map(([n, m, ml, c]) => `<div class="lf-field"><label>${esc(short(n))}: скрытый мотив и условие</label><div class="brn-sand-row">${inp(m, 'тайная установка — второй о ней не знает')}${spanSel(ml)}</div>${inp(c, 'условие: ранен, не спал двое суток, только что с задания…')}</div>`).join('')}
+            <div class="lf-field"><label>Событие извне</label><div class="brn-sand-row">${inp('ev', 'гаснет свет, звонит телефон, входит третий…')}${spanSel('evl')}</div></div>
+            <div class="lf-chips"><button class="lf-chip" data-bact="sand-start">▶ Начать сцену</button></div>`;
+    } else {
+        const [x, y] = sb.cast;
+        const now = (n) => `<div class="brn-sand-now"><b>${esc(short(n))}</b><div class="lf-chips wrap">${chip(sandView(sb.st[n], temperOf(n)))}</div>${sb.motive[n] ? `<small>скрытый мотив (${SPAN_NAME[sb.motive[n].left] || `ещё ходов: ${sb.motive[n].left}`}): ${esc(sb.motive[n].t)}</small>` : ''}</div>`;
+        const turn = (t, k) => {
+            const fx = sb.cast.map(n => (t.fx?.[n]?.why ? `${short(n)}: ${t.fx[n].why}` : '')).filter(Boolean).join(' · ');
+            const last = k === sb.turns.length - 1;
+            return `<div class="brn-sand-turn"><b>${esc(short(t.who))}${t.hand ? ' <small>✋ поправлено</small>' : ''}</b>${last ? `<textarea rows="7" data-bin="sand-edit">${esc(t.text)}</textarea>` : `<p>${esc(t.text)}</p>`}${t.thought ? `<small class="brn-sand-th">думает: ${esc(t.thought)}</small>` : ''}${fx ? `<small>что это сделало — ${esc(fx)}</small>` : ''}${t.ev ? `<small>событие: ${esc(t.ev)}</small>` : ''}</div>`;
+        };
+        inner = `<div class="lf-hint">${esc(sb.place || 'место не задано')} · ${esc(sb.setup || 'разговор наедине')} · ходов: ${sb.turns.length}. Последний ход можно поправить прямо в поле — следующий герой ответит уже на твой текст.</div>
+            ${now(x)}${now(y)}
+            ${sb.turns.map(turn).join('')}
+            <div class="lf-field"><label>Вмешаться: событие извне</label><div class="brn-sand-row">${inp('ev2', 'что происходит в следующем ходе', sandForm().ev2)}${spanSel('ev2l')}</div></div>
+            <div class="lf-chips wrap"><button class="lf-chip" data-bact="sand-turn">▶ Ход: ${esc(short(sb.next))}</button><button class="lf-chip" data-bact="sand-turn3">▶▶ Три хода</button><button class="lf-chip" data-bact="sand-swap">слово другому</button><button class="lf-chip" data-bact="sand-reset">✕ закончить сцену</button></div>`;
+    }
+    return `<details class="lf-more brn-more" ${det('sand')}><summary>🎭 Песочница${sb ? ` — ${esc(short(sb.cast[0]))} и ${esc(short(sb.cast[1]))}, ходов: ${sb.turns.length}` : ''}</summary>${inner}</details>`;
+}
+
 // ───────────── второй голос: способ привязываться — по текстам одного героя, полнее ─────────────
 /**
  * Расстановка по всему составу видит каждую карточку в сокращении (первые тысячи знаков) — и способ привязываться
@@ -2131,6 +2245,7 @@ function bodyHtml() {
         ${meHtml()}
         ${castHtml()}
         ${cardHtml(sel)}
+        ${sandHtml()}
         <details class="lf-more brn-more" ${det('g')}><summary>Настройки мозга</summary>
             ${sw('on', 'Мозг включён')}
             ${sw('drive', 'Вести состояние персонажа во «Внутри» Life (лица, чипы, соседние трекеры видят то же)')}
@@ -2245,6 +2360,18 @@ async function onClick(ev) {
             const text = r ? castDone(r) : '';
             A.toast(text ? 'success' : 'info', text ? `${text}${r.cutOwn ? ` Перепроверка сняла «намертво»: ${r.cutOwn}.` : ''}` : 'ИИ не нашёл, что расставить: вписанное тобой осталось как было.', TITLE, { timeOut: 6000 });
         }
+        if (act === 'sand-start') { sandStart(); openSet.add('sand'); }
+        if (act === 'sand-turn' || act === 'sand-turn3') {
+            const sb0 = sandOf();
+            if (sb0) {
+                const f = sandForm();
+                if (str(f.ev2, 300)) { sandSet(sb0, 'event', '', { t: f.ev2, left: f.ev2l }); f.ev2 = ''; }
+                const run = async () => { for (let k = 0; k < (act === 'sand-turn3' ? 3 : 1); k++) { await sandTurn(); refresh(); } };
+                if (A.withBusy) await A.withBusy(el, run, 'Играют…'); else await run();
+            }
+        }
+        if (act === 'sand-swap') { const sb0 = sandOf(); if (sb0) { sb0.next = sandOther(sb0, sb0.next); saveM(); } }
+        if (act === 'sand-reset') { M().sand = null; saveM(); }
         if (act === 'bonds-ready') {
             await readyFile();
             const r = readyApply();
@@ -2330,6 +2457,8 @@ function onChange(ev) {
         if (kind === 'tr') { setPair(who, el.dataset.to, { id: TROPES[el.value] ? el.value : '', hand: true }); syncPins(); }
         if (kind === 'rom' && pairOf(who, el.dataset.to)) setPair(who, el.dataset.to, { rom: ROM_NAME[el.value] ? el.value : 'no', hand: true });
         if (kind === 'lead' && pairOf(who, el.dataset.to)) { setPair(who, el.dataset.to, { lead: el.value === 'a' || el.value === 'b' ? el.value : '', hand: true }); safe(() => A.updatePrompt()); }
+        if (kind === 'sand') { sandForm()[k] = str(el.value, 300); saveM(); }
+        if (kind === 'sand-edit') { const sb0 = sandOf(); if (sb0) { sandEdit(sb0, el.value); saveM(); } }
         if (kind === 'wed') { setPair(who, el.dataset.to, { wed: wedNorm(el.value), hand: true }); safe(() => A.updatePrompt()); }
         if (kind === 'kid') { setPair(who, el.dataset.to, { kid: kidNorm(el.value), hand: true }); safe(() => A.updatePrompt()); }
         if (kind === 'own') { setPair(who, el.dataset.to, { own: ['a', 'b', 'both'].includes(el.value) ? el.value : '', hand: true }); syncPins(); safe(() => A.updatePrompt()); }

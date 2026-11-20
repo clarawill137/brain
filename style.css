@@ -210,3 +210,15 @@
 .brn-wed { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .brn-wed label { flex: 0 0 auto; font-size: 12.5px; color: var(--lf-dim); }
 .brn-wed input { flex: 1 1 auto; min-width: 0; font-size: 13px; padding: 8px 10px; }
+
+/* 0.17: песочница */
+.brn-sand-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 6px 0; }
+.brn-sand-row select, .brn-sand-row input, .brn-more input[data-bin="sand"] { min-width: 0; width: 100%; font-size: 13px; padding: 8px 10px; box-sizing: border-box; }
+.brn-sand-now { margin: 10px 0 4px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--lf-line, rgba(255, 255, 255, .1)); }
+.brn-sand-now b { display: block; margin-bottom: 6px; font: 600 14px var(--lf-sans); color: var(--lf-text); }
+.brn-sand-now small, .brn-sand-turn small { display: block; margin-top: 5px; font-size: 12.5px; line-height: 1.4; color: var(--lf-dim); }
+.brn-sand-turn { margin: 10px 0; padding: 12px 14px; border-radius: 16px; background: rgba(255, 255, 255, .03); border: 1px solid var(--lf-line, rgba(255, 255, 255, .08)); }
+.brn-sand-turn b { display: block; margin-bottom: 4px; font: 600 14px var(--lf-sans); color: var(--lf-text); }
+.brn-sand-turn p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--lf-text); white-space: pre-wrap; }
+.brn-sand-turn textarea { width: 100%; box-sizing: border-box; font-size: 14px; line-height: 1.45; }
+.brn-sand-turn .brn-sand-th { font-style: italic; }

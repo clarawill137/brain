@@ -2243,3 +2243,71 @@ test('0.16: общий ребёнок — в листе, в заметке и в
     ]);
     st.depth = null; st.md.brain.pairs = []; delete st.md.brain.bondsAt; delete st.md.brain.castFrom;
 });
+
+// ───────────── 0.17 ─────────────
+test('0.17: песочница — двое играют сцену без игрока; режиссёр задаёт сцену, правит ход и вмешивается; чат не меняется', async () => {
+    st.md.brain.pairs = []; st.md.brain.circle = []; st.md.brain.sand = null; st.md.brain.sandForm = {};
+    await fresh(17000);
+    const sand = [];
+    st.route = (msgs) => {
+        if (!/ведёшь «песочницу»/.test(msgs?.[0]?.content || '')) return null;
+        sand.push(msgs);
+        const who = /Ход за: Баки/.test(msgs[1].content) ? 'Баки' : 'Наташа';
+        return { text: `${who} ставит чашку на стол и говорит то, что давно собирался сказать, не поднимая глаз.`, thought: 'лишь бы не спросили про вчера', psy: who === 'Баки' ? [{ who: 'Наташа', by: 'Баки', blow: 2, why: 'упрекнул за молчание' }, { who: 'Баки', held: 1, why: 'сдержался' }] : [{ who: 'Баки', by: 'Наташа', warm: 2, why: 'признала правоту' }] };
+    };
+    assert.match(st.shelf.tracker.html(), /🎭 Песочница<\/summary>[\s\S]*Двое героев играют сцену без тебя; ты — режиссёр[\s\S]*▶ Начать сцену/);
+    for (const [k, v] of [['a', B], ['b', N], ['first', B], ['place', 'кухня ночью'], ['setup', 'после ссоры'], ['opening', 'он ставит чайник'], ['ma', 'хочет извиниться и не умеет'], ['mal', '3'], ['mb', 'собирается уехать утром'], ['mbl', '999'], ['cb', 'не спала двое суток'], ['ev', 'гаснет свет'], ['evl', '1']]) change({ bin: 'sand', k }, v);
+    const real = JSON.stringify(st.md.brain.who);
+    await click({ bact: 'sand-start' });
+    let sb = st.md.brain.sand;
+    assert.deepEqual([sb.cast, sb.next, sb.place, sb.motive[N].left, sb.event.t], [[B, N], B, 'кухня ночью', 999, 'гаснет свет']);
+    // первый ход
+    await click({ bact: 'sand-turn' });
+    assert.equal(sand.length, 1);
+    const u1 = sand[0][1].content;
+    assert.match(sand[0][0].content, /За второго героя не пиши[\s\S]*цифр и названий состояний не произноси[\s\S]*"psy"[\s\S]*warm — ему дали тепло/);
+    assert.match(u1, /Место: кухня ночью\. Обстоятельства: после ссоры\./);
+    assert.match(u1, /Сцена начинается с того, что: он ставит чайник\./);
+    assert.match(u1, /Ход за: Баки Барнс\.\nЧто у него внутри сейчас: /);
+    assert.match(u1, /Скрытый мотив \(второму неизвестен\): хочет извиниться и не умеет\./);
+    assert.ok(!/собирается уехать утром/.test(u1), 'чужой скрытый мотив говорящему не показывают');
+    assert.match(u1, /Наташа со стороны: [^\n]*; не спала двое суток\./);
+    assert.match(u1, /Событие извне в этом ходе: гаснет свет\./);
+    sb = st.md.brain.sand;
+    assert.equal(sb.turns.length, 1);
+    assert.deepEqual([sb.turns[0].who, sb.next, sb.event], [B, N, null]);
+    assert.deepEqual(sb.turns[0].fx[N].hits, { blow: 2 });
+    assert.ok(sb.st[N].fast.wor < 0, 'в песочнице Наташе прилетело');
+    assert.equal(JSON.stringify(st.md.brain.who), real, 'настоящее состояние героев в чате не тронуто');
+    let html = st.shelf.tracker.html();
+    assert.match(html, /🎭 Песочница — Баки и Наташа, ходов: 1/);
+    assert.match(html, /думает: лишь бы не спросили про вчера/);
+    assert.match(html, /что это сделало — Баки: сдержался · Наташа: упрекнул за молчание/);
+    assert.match(html, /скрытый мотив \(до конца сцены\): собирается уехать утром/);
+    assert.match(html, /▶ Ход: Наташа/);
+    // режиссёр правит последний ход — второй герой отвечает уже на правленое
+    change({ bin: 'sand-edit' }, 'Баки молча протягивает ей вторую чашку и садится напротив.');
+    assert.equal(st.md.brain.sand.turns[0].hand, true);
+    change({ bin: 'sand', k: 'ev2' }, 'звонит телефон');
+    change({ bin: 'sand', k: 'ev2l' }, '1');
+    await click({ bact: 'sand-turn' });
+    const u2 = sand[1][1].content;
+    assert.match(u2, /Что уже было \(последние ходы\):\nБаки: Баки молча протягивает ей вторую чашку и садится напротив\./);
+    assert.match(u2, /Ход за: Наташа Романофф\./);
+    assert.match(u2, /Скрытый мотив \(второму неизвестен\): собирается уехать утром\./);
+    assert.match(u2, /Событие извне в этом ходе: звонит телефон\./);
+    assert.ok(!/Сцена начинается с того/.test(u2));
+    assert.equal(st.md.brain.sandForm.ev2, '', 'вмешательство отыграно');
+    // три хода разом; слово можно передать другому; сцена кончается — и ничего не остаётся
+    await click({ bact: 'sand-turn3' });
+    assert.equal(st.md.brain.sand.turns.length, 5);
+    assert.equal(st.md.brain.sand.motive[B], null, 'мотив на три хода — исчерпан');
+    const nxt = st.md.brain.sand.next;
+    await click({ bact: 'sand-swap' });
+    assert.notEqual(st.md.brain.sand.next, nxt);
+    assert.equal(JSON.stringify(st.md.brain.who), real);
+    await click({ bact: 'sand-reset' });
+    assert.equal(st.md.brain.sand, null);
+    assert.match(st.shelf.tracker.html(), /▶ Начать сцену/);
+    st.route = null;
+});
