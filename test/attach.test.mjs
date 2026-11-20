@@ -352,7 +352,7 @@ test('новые тропы: создатель и творение, один у
     assert.deepEqual(tropeMul('uneven', { warm: 2, loss: 1, blow: 2 }), { warm: 1.2, loss: 1.15 });
     const p = { a: 'Хеди', b: 'Баки', own: 'a' };
     assert.equal(ownSide(p, 'Хеди'), true);
-    assert.equal(ownSide(p, 'Баки'), false, 'у неё уже намертво, у него только начинается');
+    assert.equal(ownSide(p, 'Баки'), false, 'у одного уже намертво, у другого только начинается');
     assert.equal(ownSide({ ...p, own: 'both' }, 'Баки'), true);
     assert.equal(ownSide({ ...p, own: '' }, 'Хеди'), false);
     assert.equal(ownSide(null, 'Хеди'), false);

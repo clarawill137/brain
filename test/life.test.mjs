@@ -1467,17 +1467,17 @@ test('0.10: связи расставляет ИИ — на дату чата, �
     assert.match(st.shelf.tracker.html(), /Расставить связи по истории/);
     const hadStory = st.story;
     st.story = st.story || { felt: [] };
-    // у неё уже намертво, у него только начинается
-    st.depth = { pairs: [{ a: 'Хеди Барлоу', b: 'Баки Барнс', trope: 'uneven', rom: 'hint', own: 'a', why: 'она знает, кто он; он видит её впервые' }, { a: 'Баки Барнс', b: 'Наташа Романофф', trope: 'нет такого', rom: 'no', own: 'none' }, { a: 'Баки Барнс', b: 'Баки Барнс', trope: 'kin' }] };
+    // у одного уже намертво, у другого только начинается
+    st.depth = { pairs: [{ a: 'Хеди Барлоу', b: 'Баки Барнс', trope: 'uneven', rom: 'hint', own: 'a', why: 'один знает другого давно, второй видит его впервые' }, { a: 'Баки Барнс', b: 'Наташа Романофф', trope: 'нет такого', rom: 'no', own: 'none' }, { a: 'Баки Барнс', b: 'Баки Барнс', trope: 'kin' }] };
     const n = st.fill.length;
     await click({ bact: 'bonds-fill', who: B });
     assert.equal(st.fill.length, n + 1);
     assert.match(st.fill[n].messages[0].content, /uneven — один уже любит[\s\S]*Не завышай: «намертво»/);
     assert.match(st.fill[n].messages[1].content, /Персонаж игрока: Хеди Барлоу[\s\S]*Время этого чата: эпоха «past»/);
-    assert.deepEqual(st.md.brain.pairs, [{ a: 'Хеди Барлоу', b: 'Баки Барнс', id: 'uneven', rom: 'hint', own: 'a', why: 'она знает, кто он; он видит её впервые', by: 'ai' }]);
+    assert.deepEqual(st.md.brain.pairs, [{ a: 'Хеди Барлоу', b: 'Баки Барнс', id: 'uneven', rom: 'hint', own: 'a', why: 'один знает другого давно, второй видит его впервые', by: 'ai' }]);
     assert.deepEqual(st.pins, {}, 'замков в Life расстановка не ставит');
     let html = st.shelf.tracker.html();
-    assert.match(html, /ИИ: она знает, кто он; он видит её впервые/);
+    assert.match(html, /ИИ: один знает другого давно, второй видит его впервые/);
     assert.match(html, /<option value="a" selected>Хеди — намертво<\/option>/);
     assert.equal(brain.view(B).dear, null, 'у него связь ещё складывается — она не «своя»');
     // он догнал: правим руками
