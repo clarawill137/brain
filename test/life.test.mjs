@@ -271,6 +271,7 @@ const B = 'Баки Барнс';
 const live = () => st.md.brain.who[B];
 const fresh = async (h) => { hour(h); await click({ bact: 'reset', who: B }); const i = post(B); mod.afterPost(i, { psy: [] }, chat[i]); return i; };
 const next = (psy = [], who = B) => { const i = post(who); mod.afterPost(i, { psy }, chat[i]); return i; };
+const lastIndex = () => chat.length - 1;
 
 test('0.2: «сдержался» копит несказанное, без сил оно проступает; «открылся» — отпускает', async () => {
     await fresh(300);
@@ -482,8 +483,9 @@ test('0.3: что назрело — для твиста вслепую и ис�
     live().mask = 0; live().strain = 10;
     world.scene.characters_present = ['Наташа Романофф', 'Хеди Барлоу'];
     live().strain = 90;
-    assert.equal(brain.ripe(), '', 'кого нет в сцене — не в счёт');
+    const other = brain.ripe();
     world.scene.characters_present = ['Баки Барнс', 'Хеди Барлоу'];
+    assert.ok(!/Баки/.test(other), 'кого нет в сцене — не в счёт');
 });
 
 test('0.3: стук от тоски — давно не виделись', async () => {
@@ -502,4 +504,83 @@ test('0.3: стук от тоски — давно не виделись', async
     assert.equal(brain.miss()[0].how, 'call', 'три дня — уже звонит');
     world.scene.characters_present = ['Баки Барнс', 'Хеди Барлоу'];
     assert.deepEqual(brain.miss().filter(x => x.who === B), []);
+});
+
+// ───── 0.4: потребности, комбинации, подсказки, память с чувством, заражение ─────
+
+test('0.4: потребности двигаются событиями, видны соседям и утоляются тапом', async () => {
+    await fresh(2400);
+    const base = brain.view(B).dr;
+    assert.deepEqual(Object.keys(base), ['bond', 'safe', 'free', 'need', 'quiet', 'novel']);
+    next([{ who: 'Баки', loss: 3, why: 'она сказала, что ей нужно побыть одной' }]);
+    assert.ok(brain.view(B).dr.bond < base.bond - 25);
+    const html = st.shelf.tracker.html();
+    assert.match(html, /Потребности/);
+    assert.match(html, /Близость/);
+    const low = brain.view(B).dr.bond;
+    await click({ bact: 'feed', k: 'bond', d: '20', who: B });
+    assert.equal(brain.view(B).dr.bond, low + 20);
+});
+
+test('0.4: комбинация уходит модели поведением — голод по близости со стыдом', async () => {
+    await fresh(2500);
+    live().dr.bond = 15;
+    next([{ who: 'Баки', blow: 3, why: 'увидел себя в записи ГИДРЫ' }]);
+    next([{ who: 'Баки', blow: 2, why: 'она это тоже видела' }]);
+    assert.ok(brain.view(B).combo.includes('starve'));
+    const p = mod.prompt('normal');
+    assert.match(p, /тянется к близости и отдёргивает себя/);
+    assert.match(st.shelf.tracker.html(), /Сейчас из этого выходит/);
+});
+
+test('0.4: подсказки игроку — в листе, но не в промпте', async () => {
+    await fresh(2600);
+    change({ bin: 'f', k: 'fix', who: B }, 'её голос\nдело для рук', { tagName: 'TEXTAREA' });
+    next([{ who: 'Баки', threat: 3, bound: 2, why: 'его прижали к стене' }]);
+    const html = st.shelf.tracker.html();
+    assert.match(html, /Подсказки тебе/);
+    assert.match(html, /Сработает/);
+    assert.match(html, /страх: верни контроль/);
+    assert.match(html, /больные места/);
+    assert.match(html, /Чего ждать/);
+    assert.ok(!/верни контроль|больные места|Подсказки/.test(mod.prompt('normal')));
+});
+
+test('0.4: память с чувством — сильное запоминается и всплывает позже в тон', async () => {
+    await fresh(2700);
+    const i0 = next([{ who: 'Баки', loss: 3, why: 'она ушла, хлопнув дверью' }]);
+    assert.equal(live().marks.length, 1);
+    assert.equal(live().marks[0].emo, 'low');
+    assert.match(st.shelf.tracker.html(), /Память с чувством/);
+    assert.ok(!/всплывает прежнее/.test(mod.prompt('normal')), 'свежее не всплывает');
+    hour(2760);
+    for (let k = 0; k < 22; k++) next();
+    assert.ok(!/всплывает прежнее/.test(mod.prompt('normal')), 'пока ровно — молчит');
+    next([{ who: 'Баки', loss: 3, why: 'опять один в пустой квартире' }]);
+    assert.match(mod.prompt('normal'), /всплывает прежнее[^:]*: «она ушла, хлопнув дверью»/);
+    assert.equal(live().marks.find(m => m.mes === i0).r, lastIndex());
+    const id = live().marks.find(m => m.mes === i0).id;
+    await click({ bact: 'unmark', id, who: B });
+    assert.ok(!live().marks.some(m => m.id === id));
+});
+
+test('0.4: заражение настроением — близкие в одной сцене тянут друг друга', async () => {
+    await fresh(2900);
+    world.scene.characters_present = ['Баки Барнс', 'Наташа Романофф', 'Хеди Барлоу'];
+    const nat = () => st.md.brain.who['Наташа Романофф'];
+    let i = next();
+    const calm = nat().fast.aro;
+    i = next([{ who: 'Баки', threat: 3, bound: 3, why: 'сработала тревога, двери заблокированы' }]);
+    assert.ok(nat().fast.aro > calm + 4, 'его страх передаётся ей');
+    assert.ok(st.shelf.recs(i).some(r => /Наташа: рядом Баки/.test(r.t)));
+    world.scene.characters_present = ['Баки Барнс', 'Хеди Барлоу'];
+    const far = nat().fast.aro;
+    next([{ who: 'Баки', threat: 3, why: 'ещё один взрыв' }]);
+    assert.ok(nat().fast.aro <= far, 'кого нет рядом — не заражается');
+});
+
+test('0.4: темперамент — насколько нужна каждая потребность', async () => {
+    change({ bin: 't', k: 'want.quiet', who: B }, '1.6');
+    assert.equal(st.ext.brain.prof[B].want.quiet, 1.6);
+    assert.match(st.shelf.tracker.html(), /Чего сколько надо/);
 });

@@ -118,3 +118,30 @@
 .brn-legend .wor::before { background: #8a9ee0; }
 .brn-legend .strain::before { background: #d9687b; }
 .brn-legend i { margin-left: auto; font-style: normal; }
+
+/* ───── 0.4: подсказки игроку, потребности, память с чувством ───── */
+.brn-hints { display: flex; flex-direction: column; gap: 8px; }
+.brn-hint { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--lf-line, rgba(236, 222, 216, .11)); background: rgba(255, 255, 255, .03); }
+.brn-hint > b { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--lf-dim, #a3958f); }
+.brn-hint > span { font-size: 13.5px; line-height: 1.4; color: var(--lf-text, #ede4df); }
+.brn-hint.ok { border-color: rgba(127, 183, 164, .4); }
+.brn-hint.ok > b { color: #9fd0bd; }
+.brn-hint.no { border-color: rgba(217, 80, 106, .45); }
+.brn-hint.no > b { color: #e58a9a; }
+.brn-hint.eta { border-style: dashed; }
+.brn-drs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.brn-dr { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--lf-line, rgba(236, 222, 216, .11)); background: rgba(255, 255, 255, .03); color: var(--lf-text, #ede4df); text-align: left; cursor: pointer; }
+.brn-dr:active { transform: scale(.97); }
+.brn-dr > span { font-size: 13px; }
+.brn-dr > i { display: block; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+.brn-dr > i u { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #7fb7a4, #a9d6b8); transition: width .5s var(--lf-ease, ease); }
+.brn-dr.b2 > i u { background: #e8c37a; }
+.brn-dr.b1 > i u { background: #e8a46a; }
+.brn-dr.b0 > i u { background: #d9506a; }
+.brn-dr.b1, .brn-dr.b0 { border-color: rgba(232, 164, 106, .45); }
+.brn-dr > small { font-size: 11.5px; color: var(--lf-dim, #a3958f); }
+.brn-marks { display: flex; flex-direction: column; }
+.brn-mark { display: grid; grid-template-columns: 26px 1fr 34px; gap: 8px; align-items: start; padding: 9px 2px; border-bottom: 1px solid var(--lf-line, rgba(236, 222, 216, .11)); }
+.brn-mark:last-child { border-bottom: 0; }
+.brn-mark b { display: block; font-size: 13.5px; font-weight: 500; line-height: 1.35; color: var(--lf-text, #ede4df); }
+.brn-mark small { display: block; font-size: 12px; color: var(--lf-dim, #a3958f); }

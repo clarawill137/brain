@@ -7,6 +7,8 @@
 // Слои:  fast — вспышка (гаснет за час истории);  mood — настроение (держится полдня);  base — характер (ползёт неделями).
 
 export const AXES = ['val', 'aro', 'ctl', 'wor'];
+/** Потребности (считает core/drives.js): близость, безопасность, свобода, нужность, покой от людей, новизна. */
+export const DRIVES = ['bond', 'safe', 'free', 'need', 'quiet', 'novel'];
 
 /** Что может случиться с человеком. Летописец ставит силу 0–3 каждому виду. */
 export const KINDS = ['warm', 'fun', 'win', 'calm', 'threat', 'blow', 'bound', 'wrong', 'loss', 'held', 'open'];
@@ -66,6 +68,7 @@ export function defaultTemper() {
         fix: [],       // что его возвращает в себя: ['её голос', 'счёт вслух', …]
         beliefs: [],   // с чем о себе живёт: [{ id, t: 'я испорченный', truth: 'что станет правдой, если сломается' }]
         dates: [],     // дни, которые помнит телом: [{ md: '12-16', t: 'что это', kind: 'loss' | 'blow' }]
+        want: { bond: 1, safe: 1, free: 1, need: 1, quiet: 1, novel: 1 },   // насколько ему нужна каждая потребность
         note: '',
         src: 'auto',
     };
@@ -84,6 +87,8 @@ export function normTemper(t) {
     out.grit = r1(clamp(x.grit ?? 1, 0.4, 2));
     out.sens = {};
     for (const k of Object.keys(d.sens)) out.sens[k] = r1(clamp(x.sens?.[k] ?? 1, 0.3, 2.5));
+    out.want = {};
+    for (const k of DRIVES) out.want[k] = r1(clamp(x.want?.[k] ?? 1, 0.4, 1.8));
     out.cass = x.cass && typeof x.cass === 'object' ? x.cass : {};
     out.fix = (Array.isArray(x.fix) ? x.fix : []).map(v => String(v || '').trim().slice(0, 80)).filter(Boolean).slice(0, 6);
     out.beliefs = (Array.isArray(x.beliefs) ? x.beliefs : []).map(b => {
@@ -113,7 +118,7 @@ export function beliefId(t) {
 /** Новое состояние: всё спокойно, характер — в точке темперамента. */
 export function fresh(temper) {
     const t = normTemper(temper);
-    return { fast: zero(), mood: zero(), base: { ...t.base }, will: 85, strain: 10, mask: 0, at: null, brk: null, hang: null, bel: {}, hist: [], log: [] };
+    return { fast: zero(), mood: zero(), base: { ...t.base }, will: 85, strain: 10, mask: 0, at: null, brk: null, hang: null, bel: {}, hist: [], marks: [], log: [] };
 }
 
 /** Починить состояние после загрузки (старый формат, пустые поля). */
@@ -129,6 +134,7 @@ export function heal(s, temper) {
     s.mask = clamp(s.mask ?? 0, 0, 100);
     if (!s.bel || typeof s.bel !== 'object' || Array.isArray(s.bel)) s.bel = {};
     if (!Array.isArray(s.hist)) s.hist = [];
+    if (!Array.isArray(s.marks)) s.marks = [];
     if (!Array.isArray(s.log)) s.log = [];
     if (s.brk && typeof s.brk !== 'object') s.brk = null;
     if (s.hang && typeof s.hang !== 'object') s.hang = null;
@@ -436,7 +442,7 @@ const CLOSE_KINDS = ['talk', 'court', 'touch', 'flirt', 'spicy'];
 
 /**
  * Хватит ли его на этот шаг. ctx.steps — сколько уже прожито вдвоём (каждая ступень удешевляет близкие шаги),
- * ctx.loose — тормоза сняты. { ok, cost, why, bold }
+ * ctx.loose — тормоза сняты, ctx.hungry — изголодался по близости. { ok, cost, why, bold }
  */
 export function afford(s, dom, kind, ctx = {}) {
     let cost = INIT_COST[kind] ?? 6;
@@ -444,6 +450,7 @@ export function afford(s, dom, kind, ctx = {}) {
     if (dom?.id === 'tender' || dom?.id === 'playful') cost *= 0.6;
     if ((dom?.id === 'fear' || dom?.id === 'shame') && dom.step >= 2) cost *= 1.5;
     if (ctx.loose) cost *= 0.6;
+    if (ctx.hungry && CLOSE_KINDS.includes(kind)) cost *= 0.8;      // голод по близости подталкивает
     cost = Math.round(cost * 10) / 10;
     if (s.brk) return { ok: false, cost, why: 'сейчас не до того — его несёт' };
     if (dom?.id === 'fear' && dom.step >= 3 && CLOSE_KINDS.includes(kind)) return { ok: false, cost, why: 'страх держит: тянется и отдёргивает себя' };
@@ -493,4 +500,37 @@ export function sample(s, E, day) {
     const k = s.hist.findIndex(x => x.d === row.d);
     if (k >= 0) s.hist[k] = row; else s.hist.push(row);
     if (s.hist.length > 60) s.hist.splice(0, s.hist.length - 60);
+}
+
+// ───────────── память с чувством ─────────────
+
+const FAMILY = { fear: 'neg', anger: 'neg', shame: 'neg', low: 'neg', tender: 'pos', playful: 'pos' };
+
+/**
+ * Запомнить сильное: m = { mes, day, t: что случилось, emo: чем это было для него, w: вес 1–3 }.
+ * Память короткая и злая: 40 меток, вытесняются слабые и старые.
+ */
+export function mark(s, m) {
+    const t = String(m?.t || '').trim().slice(0, 120);
+    if (!t || !FAMILY[m.emo]) return null;
+    if (s.marks.some(x => x.mes === m.mes && x.emo === m.emo)) return null;
+    const row = { id: `m${num(m.mes)}${m.emo[0]}`, mes: num(m.mes), day: String(m.day || ''), t, emo: m.emo, w: Math.round(clamp(m.w, 1, 3)), r: null };
+    s.marks.push(row);
+    if (s.marks.length > 40) {
+        const drop = s.marks.slice().sort((a, b) => a.w - b.w || a.mes - b.mes)[0];
+        s.marks = s.marks.filter(x => x !== drop);
+    }
+    return row;
+}
+
+/**
+ * Что всплывает в тон тому, что он чувствует сейчас: метка с тем же чувством (или хотя бы того же знака),
+ * не свежая (старше gap постов) и не всплывавшая недавно (cool постов). Тяжёлое — раньше. null — ничего.
+ */
+export function pickRecall(s, dom, lastI, gap = 20, cool = 25) {
+    if (!dom?.id || dom.step < 2) return null;
+    const fam = FAMILY[dom.id];
+    const pool = s.marks.filter(x => FAMILY[x.emo] === fam && lastI - x.mes >= gap && (x.r == null || lastI - x.r >= cool));
+    if (!pool.length) return null;
+    return pool.sort((a, b) => (b.emo === dom.id) - (a.emo === dom.id) || b.w - a.w || b.mes - a.mes)[0];
 }

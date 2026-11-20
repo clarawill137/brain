@@ -1,0 +1,156 @@
+// Код-мозг — потребности. Шесть медленных шкал «сыт / голоден» (100 — сыт, 0 — на краю): близость, безопасность,
+// свобода, нужность, покой от людей, новизна. Их двигают те же события, что и чувства (отдельных вопросов
+// Летописцу нет), и время: близость тает в разлуке, новизна — в рутине, покой — в толпе.
+// Сами по себе шкалы скучны; интересно, что выходит на пересечении с чувством и волей — комбинации:
+// голод по близости + стыд = «тянется и отдёргивает себя», тесно + злость = «делает наперекор».
+// Чистая математика: без Таверны, Life и DOM.
+
+import { STEP, DRIVES, clamp, willBand } from './psyche.js';
+
+export { DRIVES };
+export const DRIVE_NAME = { bond: 'Близость', safe: 'Безопасность', free: 'Свобода', need: 'Нужность', quiet: 'Покой от людей', novel: 'Новизна' };
+export const DRIVE_ICON = { bond: '🤍', safe: '🛡', free: '🕊', need: '🧰', quiet: '🌿', novel: '🎲' };
+/** Куда шкала возвращается сама, когда ничего не происходит. */
+export const REST = { bond: 60, safe: 75, free: 70, need: 65, quiet: 70, novel: 55 };
+export const BAND_NAME = ['на краю', 'голод', 'хочется', 'сыт'];
+
+// как событие двигает потребности (на единицу силы)
+const D_HIT = {
+    warm: { bond: 0.9, safe: 0.4, need: 0.3 },
+    fun: { novel: 1.0, bond: 0.3 },
+    win: { need: 1.0, free: 0.5 },
+    calm: { safe: 0.7, quiet: 0.6 },
+    threat: { safe: -1.1 },
+    blow: { need: -0.8, bond: -0.2 },
+    bound: { free: -1.2, safe: -0.3 },
+    wrong: { safe: -0.4, bond: -0.4 },
+    loss: { bond: -1.2 },
+    held: { free: -0.25 },
+    open: { bond: 0.6, free: 0.2 },
+};
+
+const num = (v, d = 0) => (Number.isFinite(+v) ? +v : d);
+
+export const freshDrives = () => ({ ...REST });
+
+/** Починить потребности в состоянии (старые сохранения, пустые поля). */
+export function healDrives(s) {
+    if (!s.dr || typeof s.dr !== 'object') s.dr = freshDrives();
+    for (const k of DRIVES) s.dr[k] = clamp(s.dr[k] ?? REST[k], 0, 100);
+    return s;
+}
+
+/** Насколько сыт: 3 — сыт, 2 — хочется, 1 — голод, 0 — на краю. */
+export const driveBand = (v) => (v >= 60 ? 3 : v >= 35 ? 2 : v >= 15 ? 1 : 0);
+
+/** Событие двигает потребности. want — насколько ему это нужно (сильнее нужно — больнее теряет). */
+export function driveHit(s, hits, temper) {
+    healDrives(s);
+    const d = {};
+    for (const [k, n] of Object.entries(hits || {})) {
+        const H = D_HIT[k];
+        const u = STEP[Math.round(clamp(n, 0, 3))];
+        if (!H || !u) continue;
+        for (const [dr, c] of Object.entries(H)) {
+            const x = c * u * (c < 0 ? num(temper?.want?.[dr], 1) : 1);
+            s.dr[dr] = clamp(s.dr[dr] + x, 0, 100);
+            d[dr] = (d[dr] || 0) + x;
+        }
+    }
+    for (const k of Object.keys(d)) d[k] = Math.round(d[k]);
+    return d;
+}
+
+/**
+ * Прошло hours часов истории. ctx: together — рядом ли близкий человек (null — близкого нет вовсе); crowd — сколько людей вокруг (0 — неизвестно).
+ * Близость тает в разлуке и медленно набирается рядом; новизна тает всегда; покой уходит в толпе и возвращается
+ * в тишине; остальное тянется к своей норме.
+ */
+export function driveDecay(s, hours, temper, ctx = {}) {
+    healDrives(s);
+    const h = clamp(hours, 0, 24 * 30);
+    if (!h) return s;
+    const want = (k) => num(temper?.want?.[k], 1);
+    const to = (k, target, hl) => { s.dr[k] = target + (s.dr[k] - target) * Math.pow(0.5, h / hl); };
+    // близость считается только у тех, у кого есть близкий человек в истории (together: true / false);
+    // нет такого (null) — шкала просто держится у нормы, а не голодает вечно
+    if (ctx.together == null) to('bond', REST.bond, 48);
+    else if (ctx.together) { if (s.dr.bond < 75) s.dr.bond = Math.min(75, s.dr.bond + 1.5 * h); }
+    else s.dr.bond -= 1.0 * want('bond') * h;
+    to('safe', REST.safe, 24);
+    to('free', REST.free, 72);
+    to('need', REST.need, 72);
+    const crowd = num(ctx.crowd);
+    if (crowd >= 4) s.dr.quiet -= 6 * want('quiet') * h;
+    else s.dr.quiet += (crowd && crowd <= 2 ? 5 : 2) * h;
+    s.dr.novel -= 0.15 * want('novel') * h;      // неделя с лишним без нового — и рутина начинает давить
+    for (const k of DRIVES) s.dr[k] = clamp(s.dr[k], 0, 100);
+    return s;
+}
+
+/** Самая голодная потребность: { id, v, band } или null, если все сыты. */
+export function hungriest(s) {
+    healDrives(s);
+    const [id, v] = DRIVES.map(k => [k, s.dr[k]]).sort((a, b) => a[1] - b[1])[0];
+    return v < 60 ? { id, v, band: driveBand(v) } : null;
+}
+
+// ───────────── комбинации: что выходит на пересечении ─────────────
+
+const NEG = ['fear', 'anger', 'shame', 'low'];
+
+/**
+ * Комбо-состояния сейчас, от самого сильного: [{ id, w, t }]. v: { s (с dr, will, strain), dom, worry, apart }.
+ * apart — близкий человек сейчас не рядом: голод по близости звучит тоской по нему, а не тягой коснуться.
+ * Тексты без рода и без названий шкал — модели это уйдёт как поведение.
+ */
+export function combos(v) {
+    const s = healDrives(v.s);
+    const dr = s.dr, dom = v.dom || { id: '', step: 0 };
+    const band = willBand(s.will);
+    const lack = (k, edge = 35) => Math.max(0, (edge - dr[k]) / edge);     // 0…1: насколько голоден
+    const is = (id, step = 1) => dom.id === id && dom.step >= step;
+    const neg = NEG.includes(dom.id);
+    const out = [];
+    const add = (id, w, t) => { if (w > 0) out.push({ id, w: Math.round(w * 100) / 100, t }); };
+
+    // близость
+    if (lack('bond')) {
+        const far = !!v.apart;
+        if (is('shame', 2)) add('starve', lack('bond') + 0.5, far
+            ? 'скучает и запрещает себе это: набирает сообщение и стирает, считает, что не вправе просить'
+            : 'тянется к близости и отдёргивает себя: считает, что не вправе просить');
+        else if (is('fear', 1) && dr.bond <= 20) add('cling', lack('bond') + 0.4, far
+            ? 'не находит места, пока близкий человек не рядом: проверяет телефон, прислушивается к двери'
+            : 'держится вплотную, не выпускает из виду, касается, чтобы убедиться, что рядом');
+        else if (!neg && band >= 2) add('reach', lack('bond') + 0.2, far
+            ? 'скучает: мысли то и дело уходят к тому, кого нет рядом, рука сама тянется к телефону'
+            : 'голод по близости: ищет повод коснуться, сесть рядом, задержать ещё на минуту');
+        else add('ache', lack('bond'), far
+            ? 'не хватает близкого человека: всё делает как обычно, но вполсилы и без вкуса'
+            : 'не хватает близости, но попросить не выходит: задерживает взгляд, остаётся в комнате без дела');
+    }
+    // безопасность
+    if (lack('safe')) {
+        if (v.worry) add('control', lack('safe') + 0.5, 'гиперконтроль: встаёт между близким и дверью, проверяет замки по второму кругу, не отпускает от себя ни на шаг');
+        else add('guard', lack('safe') + 0.1, 'настороже: садится лицом к двери, отмечает выходы, вздрагивает от резкого');
+    }
+    // свобода
+    if (lack('free')) {
+        if (is('anger', 1)) add('rebel', lack('free') + 0.5, 'делает наперекор, даже себе во вред: сейчас важнее всего решить по-своему');
+        else if (is('fear', 2) || is('shame', 2) || band === 0) add('yield', lack('free') + 0.4, 'соглашается слишком быстро и молча: сил отстаивать своё нет');
+        else add('chafe', lack('free') + 0.1, 'тесно: огрызается на заботу, которая похожа на запрет, дёргает плечом из-под руки');
+    }
+    // нужность
+    if (lack('need')) {
+        if (is('low', 1) || is('shame', 1)) add('useless', lack('need') + 0.3, 'ощущение своей ненужности: отходит в сторону, помощь первым не предлагает');
+        else if (band >= 2) add('useful', lack('need') + 0.2, 'ищет, чем быть полезным: берётся за лишнее, чинит, готовит, не может сидеть без дела');
+    }
+    // покой от людей
+    if (lack('quiet', 30)) add('peopled', lack('quiet', 30) + 0.2, 'людей сейчас слишком много: с чужими односложен, ищет угол и повод уйти');
+    // новизна
+    if (lack('novel', 20) && !neg && band >= 2) add('bored', lack('novel', 20), 'рутина давит: тянет что-нибудь затеять, сменить место, подбить на авантюру');
+    // редкий покой — когда всё сошлось
+    if (dr.safe >= 85 && dr.bond >= 75 && !neg && s.strain < 25) add('rest', 0.6, 'редкий покой: плечи опущены, спина не к стене, смеётся легче обычного');
+    return out.sort((a, b) => b.w - a.w);
+}

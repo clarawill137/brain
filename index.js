@@ -7,8 +7,10 @@
 
 import * as P from './core/psyche.js';
 import { EMO_NAME, EMO_TITLE, EMO_ICON, WILL_TEXT, WILL_NAME, SINGLES, SINGLE_TITLE, BELIEF_NAME, cassOf, cassText, cassLines, cleanCass, beliefText } from './core/cassettes.js';
+import { DRIVE_NAME, DRIVE_ICON, BAND_NAME, freshDrives, healDrives, driveHit, driveDecay, driveBand, combos } from './core/drives.js';
+import { hints } from './core/hints.js';
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const ID = 'brain';
 const TITLE = '🧠 Мозг';
 const NARR = /рассказчик|narrator|мастер|game ?master|(^|[^a-z])gm([^a-z]|$)|мнемозина/i;
@@ -16,7 +18,9 @@ const NEG = ['fear', 'anger', 'shame', 'low'];
 const SEV = ['', 'лёгкая', 'средняя', 'тяжёлая', 'критическая'];
 const KIND_NAME = { warm: 'тепло', fun: 'веселье', win: 'победа', calm: 'покой', threat: 'угроза', blow: 'удар по самооценке', bound: 'потеря контроля', wrong: 'несправедливость', loss: 'утрата', held: 'сдержался', open: 'открылся' };
 const AX_NAME = { val: ['мрак', 'тепло'], aro: ['пусто', 'заряд'], ctl: ['бессилие', 'контроль'], wor: ['стыд', 'самоценность'] };
-const D_NAME = { val: 'тепло', aro: 'заряд', ctl: 'контроль', wor: 'самоценность', will: 'воля', strain: 'напряжение', mask: 'несказанное' };
+const D_NAME = { val: 'тепло', aro: 'заряд', ctl: 'контроль', wor: 'самоценность', will: 'воля', strain: 'напряжение', mask: 'несказанное', bond: 'близость', safe: 'безопасность', free: 'свобода', need: 'нужность', quiet: 'покой', novel: 'новизна' };
+// чем было событие для человека, если ведущего чувства после него нет
+const KIND_EMO = { threat: 'fear', bound: 'fear', wrong: 'anger', blow: 'shame', loss: 'low', warm: 'tender', open: 'tender', fun: 'playful', win: 'playful' };
 // какое состояние из «Внутри» Life соответствует ведущей эмоции
 const INNER = { fear: 'restless', anger: 'irritated', shame: 'thoughtful', low: 'sad', tender: 'good', playful: 'playful' };
 // по какой оси видно, вспышка это или уже настроение
@@ -98,7 +102,7 @@ function editTemper(who, fn) {
 function stateOf(who) {
     const m = M();
     const k = A.canonName(who);
-    m.who[k] = P.heal(m.who[k], temperOf(who));
+    m.who[k] = healDrives(P.heal(m.who[k], temperOf(who)));
     return m.who[k];
 }
 
@@ -163,8 +167,16 @@ function hoursBetween(a, b) {
 
 // ───────────── органы чувств: что Life знает о теле и нервах ─────────────
 
-function close(who, to) {
-    try { const r = A.relOf(who, to); return !!r && num(r.closeness) >= 60; } catch { return false; }
+function close(who, to, min = 60) {
+    try { const r = A.relOf(who, to); return !!r && num(r.closeness) >= min; } catch { return false; }
+}
+/** Что вокруг него сейчас — для потребностей: рядом ли близкий (героиня игрока) и сколько людей в сцене. */
+function around(who, here = present()) {
+    const U = user();
+    const there = inScene(who, here);
+    const dear = !!U && close(who, U);
+    // кто в сцене, неизвестно — не гадаем: шкала близости просто держится у нормы
+    return { together: dear && here.length ? there && inScene(U, here) : null, crowd: there ? here.length : 0 };
 }
 
 /**
@@ -248,6 +260,12 @@ function signals(who, t = temperOf(who), s = stateOf(who)) {
         out.willCap = Math.min(out.willCap, 80);
         out.night = true;
     }
+    // потребности: без чувства безопасности нервы тоньше; в толпе, когда людей уже слишком много, — копится
+    const dr = s?.dr;
+    if (dr) {
+        if (dr.safe <= 35) { out.raw *= 1.15; out.list.push({ id: 'unsafe', text: 'не чувствует себя в безопасности' }); }
+        if (dr.quiet <= 30 && present().length >= 4 && inScene(who)) { out.strainIn += 0.3; out.list.push({ id: 'crowd', text: 'слишком много людей вокруг' }); }
+    }
     out.strainIn = Math.max(0, out.strainIn);
     return out;
 }
@@ -259,15 +277,17 @@ function view(who) {
     const live = stateOf(who);
     const sig = signals(who, t, live);
     const s = clone(live);
-    if (s.at) P.decay(s, hoursBetween(s.at, nowStamp()), t, loadOf(sig));
+    if (s.at) { const h = hoursBetween(s.at, nowStamp()); P.decay(s, h, t, loadOf(sig)); driveDecay(s, h, t, around(who)); }
     else s.will = Math.min(s.will, sig.willCap);
     const E = P.eff(s, sig.off);
-    return { who, t, s, sig, E, dom: P.dominant(E, s.base) };
+    const dom = P.dominant(E, s.base);
+    const near = around(who);
+    return { who, t, s, sig, E, dom, combo: combos({ s, dom, worry: sig.worry, apart: near.together === false }) };
 }
 
 const domLabel = (dom) => (dom?.id ? EMO_NAME[dom.id][dom.step - 1] : 'ровно');
 /** Сколько прожито вдвоём с героиней игрока и сняты ли тормоза — для цены шага. */
-const initCtx = (who, v) => ({ steps: num(safe(() => A.senses?.steps?.(who, user())?.n, 0)), loose: !!v.sig.loose });
+const initCtx = (who, v) => ({ steps: num(safe(() => A.senses?.steps?.(who, user())?.n, 0)), loose: !!v.sig.loose, hungry: num(v.s?.dr?.bond, 60) <= 35 });
 
 // ───────────── Летописец ─────────────
 
@@ -334,6 +354,7 @@ function afterPost(i, j, msg) {
     const here = present();
     const rows = Array.isArray(j?.psy) ? j.psy : [];
     const trig = safe(() => A.senses?.trigAt?.(i) || [], []);
+    const done = [];
     for (const who of list()) {
         const t = temperOf(who);
         const s = stateOf(who);
@@ -347,7 +368,11 @@ function afterPost(i, j, msg) {
         } else if (s.night?.bad && there) s.night.n = num(s.night.n) + 1;
         const sig = signals(who, t, s);
         // время: вспышки гаснут, настроение оседает, воля возвращается, напряжение и несказанное идут к равновесию
-        P.decay(s, s.at ? hoursBetween(s.at, n) : 0, t, { ...loadOf(sig), nights, sleepQ: sig.sleepQ * (nights && s.night?.bad ? 0.3 : 1) });
+        const hrs = s.at ? hoursBetween(s.at, n) : 0;
+        P.decay(s, hrs, t, { ...loadOf(sig), nights, sleepQ: sig.sleepQ * (nights && s.night?.bad ? 0.3 : 1) });
+        const env = around(who, here);
+        driveDecay(s, hrs, t, env);
+        if (there && env.crowd >= 4) s.dr.quiet = P.clamp(s.dr.quiet - 3 * num(t.want.quiet, 1), 0, 100);   // каждый ответ в толпе
         s.at = { ts: n.ts, mes: i, day: n.day };
         if (s.hang && P.hangOver(s, n)) s.hang = null;
         // срыв был сигналом на этот ответ: он его сыграл (или прошло два ответа) — дальше похмелье
@@ -368,7 +393,7 @@ function afterPost(i, j, msg) {
             s.lastTrig = i;
         }
         if (Object.keys(hits).length) {
-            const d = P.hit(s, hits, t, { raw: sig.raw });
+            const d = { ...P.hit(s, hits, t, { raw: sig.raw }), ...driveHit(s, hits, t) };
             const neg = Object.keys(hits).some(k => P.NEGATIVE.includes(k));
             log(s, { mes: i, src: 'post', why, hits, d });
             if (why) s.why = { t: why, mes: i, neg };
@@ -394,9 +419,15 @@ function afterPost(i, j, msg) {
         }
         const E = P.eff(s, sig.off);
         const dom = P.dominant(E, s.base);
+        // память с чувством: сильное запоминается вместе с тем, чем оно для него было…
+        const top = Object.entries(hits).filter(([k]) => KIND_EMO[k]).sort((a, b) => b[1] - a[1])[0];
+        if (why && top && top[1] >= 3) P.mark(s, { mes: i, day: n.day, t: why, emo: dom.id || KIND_EMO[top[0]], w: top[1] });
+        // …и всплывает потом в тон тому, что он чувствует
+        const rc = P.pickRecall(s, dom, i);
+        if (rc) { rc.r = i; s.recall = { id: rc.id, at: i, t: rc.t, day: rc.day }; }
         // шаги по своей инициативе, сделанные в этом посте, стоят воли
         for (const sp of spends.filter(x => x.i === i && A.sameName(x.who, who))) {
-            const g = P.afford(s, dom, sp.kind, initCtx(who, { sig }));
+            const g = P.afford(s, dom, sp.kind, initCtx(who, { sig, s }));
             P.spend(s, g.cost);
             log(s, { mes: i, src: 'init', why: `сам сделал шаг (${INIT_NAME[sp.kind] || 'инициатива'}): воля −${g.cost}` });
         }
@@ -406,6 +437,7 @@ function afterPost(i, j, msg) {
             const kind = P.breakCheck(s, E, said);
             if (kind) {
                 s.brk = { mes: i, ts: n.ts, kind, why: why || s.why?.t || '' };
+                if (s.brk.why) P.mark(s, { mes: i, day: n.day, t: `сорвался: ${s.brk.why}`, emo: NEG.includes(dom.id) ? dom.id : 'low', w: 3 });
                 log(s, { mes: i, src: 'brk', why: kind === 'acute' ? 'срыв: удар в больное' : 'срыв: накопилось, держать нечем' });
                 const name = A.canonName(who);
                 A.toast('warning', `${esc(short(who))}: срыв — ${kind === 'acute' ? 'удар пришёлся в больное' : 'накопилось, держать больше нечем'}. В следующем ответе это прорвётся.<br><small>тапни — отменить</small>`, TITLE, {
@@ -426,6 +458,19 @@ function afterPost(i, j, msg) {
             const face = s.hang && !last.id ? 'sad' : last.step >= 2 ? FACE[last.id] : '';
             if (face) safe(() => A.senses.face(i, who, face));
         }
+        done.push({ who, s, dom: last, there });
+    }
+    // заражение настроением: близкие люди в одной сцене тянут друг друга (один источник на пост)
+    for (const a of done) {
+        if (!a.there) continue;
+        const src = done.find(b => b !== a && b.there && b.dom.id && b.dom.step >= 2 && close(a.who, b.who, 50));
+        if (!src) continue;
+        if (NEG.includes(src.dom.id)) {
+            a.s.fast.aro = P.clamp(a.s.fast.aro + 6, -150, 150);
+            a.s.fast.val = P.clamp(a.s.fast.val - 4, -150, 150);
+            a.s.strain = P.clamp(a.s.strain + 2, 0, 100);
+        } else a.s.fast.val = P.clamp(a.s.fast.val + 5, -150, 150);
+        log(a.s, { mes: i, src: 'near', why: `рядом ${short(src.who)} (${domLabel(src.dom)}) — передаётся` });
     }
     for (let k = spends.length - 1; k >= 0; k--) if (spends[k].i <= i) spends.splice(k, 1);
     saveM();
@@ -474,19 +519,25 @@ function note(who) {
     const extra = [];
     const leak = P.leakOf(s, sig.loose);
     if (leak) extra.push(`${leak === 2 ? 'то, что прячет, уже почти не держится и может сорваться с языка' : 'то, что прячет, проступает сильнее обычного'}: ${cassText(t, 'leak')}`);
-    if (sig.worry && inScene(user())) extra.push(`тревога за близкого (${U}) выходит опекой: ${cassText(t, 'care')}`);
+    // комбинации потребностей с чувством: самая сильная — сразу, вторая — если останется место
+    const cmb = v.combo || [];
+    if (cmb[0]) extra.push(cmb[0].t);
+    if (sig.worry && inScene(user()) && cmb[0]?.id !== 'control') extra.push(`тревога за близкого (${U}) выходит опекой: ${cassText(t, 'care')}`);
+    if (s.recall && A.chatArr().length - 1 - s.recall.at <= 1) extra.push(`всплывает прежнее${s.recall.day ? ` (${s.recall.day})` : ''}: «${s.recall.t}» — не обязательно вслух, но оно здесь`);
     if (sig.night && num(s.night?.n) < 6) extra.push(`ночь была плохой — ${cassText(t, 'night')}`);
     if (sig.date) extra.push(`сегодня ${sig.date.t} — помнит этот день телом, вслух может и не сказать`);
     const bel = beliefBit(v);
     if (bel) extra.push(bel);
     if (sig.loose) extra.push('под алкоголем: тормоза слабее, скрываемое ближе к поверхности');
+    if (cmb[1]) extra.push(cmb[1].t);
     bits.push(...extra.slice(0, 3));
     const neg = NEG.includes(dom.id);
     if (neg && dom.step >= 2 && t.fix.length) bits.push(`что возвращает в себя (сам к этому тянется): ${t.fix.slice(0, 4).join(', ')}`);
     const band = P.willBand(s.will);
     const will = WILL_TEXT[band];
     if (!bits.length && !will) return '';
-    const fresh = s.why && A.chatArr().length - 1 - s.why.mes <= 6 && (!dom.id || s.why.neg === neg) ? s.why.t : '';
+    // причину называем, только когда есть само чувство (у комбинации потребностей причина — время, а не событие)
+    const fresh = (dom.id || s.hang) && s.why && A.chatArr().length - 1 - s.why.mes <= 6 && (!dom.id || s.why.neg === neg) ? s.why.t : '';
     let tail = '';
     const deep = neg ? s.mood[MAIN_AX[dom.id]] : 0;
     if (neg && deep <= -16) tail = ' Это уже не вспышка, а настроение: от одной хорошей фразы не отпустит — теплеет постепенно, за несколько шагов.';
@@ -532,6 +583,9 @@ function ripeOf() {
         if (sig.worry) found.push([4, `${W} изводится тревогой за близкого`]);
         if (sig.list.some(x => x.id === 'unsaid')) found.push([3, `${W} давно молчит о собственном желании`]);
         if (sig.night) found.push([2, `у ${W} была плохая ночь`]);
+        if (s.dr.bond <= 25) found.push([4, `${W}: голод по близости, давно никто не был рядом по-настоящему`]);
+        if (s.dr.novel <= 15) found.push([1, `${W}: рутина душит, тянет на авантюру`]);
+        if (s.dr.free <= 25) found.push([3, `${W}: тесно, слишком долго решали за него`]);
     }
     found.sort((a, b) => b[0] - a[0]);
     return found[0]?.[1] || '';
@@ -548,7 +602,8 @@ function missOf() {
         const s = stateOf(who);
         if (!s.seen || s.brk || s.will < 20 || !close(who, U)) continue;
         const h = hoursBetween(s.seen, now);
-        const far = s.seen.ts != null && now.ts != null ? h >= 30 : aiSince(s.seen.mes, now.mes) >= 80;
+        const hungry = num(s.dr?.bond, 60) <= 35;
+        const far = s.seen.ts != null && now.ts != null ? h >= (hungry ? 18 : 30) : aiSince(s.seen.mes, now.mes) >= (hungry ? 50 : 80);
         if (!far) continue;
         out.push({ h, id: `brn:${A.canonName(who)}:${now.day || Math.floor(now.mes / 80)}`, who: A.canonName(who), how: h >= 72 ? 'call' : 'text', why: 'давно не виделись: скучает и хочет знать, как дела' });
     }
@@ -558,13 +613,14 @@ function missOf() {
 // ───────────── темперамент из карточки и лорбука ─────────────
 
 const COLLECT_SYS = `Ты настраиваешь «код-мозг» персонажа ролевой истории: его психику дальше считает программа, а не модель. По карточке, ядру характера и записям лорбука выпиши ТЕМПЕРАМЕНТ и КАССЕТЫ ПОВЕДЕНИЯ. Ответь только одним JSON по-русски:
-{"note":"1–2 предложения: что у него за психика, главное","base":{"val":0,"aro":0,"ctl":0,"wor":0},"react":1,"recover":1,"grit":1,"sens":{"warm":1,"threat":1,"blow":1,"bound":1,"wrong":1,"loss":1},"cass":{"fear":["","","",""],"anger":["","","",""],"shame":["","","",""],"low":["","",""],"tender":["","",""],"playful":["",""],"brk":"","hang":"","care":"","night":"","leak":""},"fix":[""],"beliefs":[{"t":"","truth":""}],"dates":[{"md":"ММ-ДД","t":"","kind":"loss"}]}
+{"note":"1–2 предложения: что у него за психика, главное","base":{"val":0,"aro":0,"ctl":0,"wor":0},"react":1,"recover":1,"grit":1,"sens":{"warm":1,"threat":1,"blow":1,"bound":1,"wrong":1,"loss":1},"cass":{"fear":["","","",""],"anger":["","","",""],"shame":["","","",""],"low":["","",""],"tender":["","",""],"playful":["",""],"brk":"","hang":"","care":"","night":"","leak":""},"fix":[""],"beliefs":[{"t":"","truth":""}],"dates":[{"md":"ММ-ДД","t":"","kind":"loss"}],"want":{"bond":1,"safe":1,"free":1,"need":1,"quiet":1,"novel":1}}
 base — его обычное состояние в спокойный день, каждая ось от −30 до 30 (0 — обычный человек): val — мрачность (минус) или тепло (плюс); aro — вялость (минус) или взведённость (плюс); ctl — чувство беспомощности (минус) или контроля над собой и ситуацией (плюс; у обученных бойцов и лидеров 20–30); wor — стыд и вина за себя (минус) или самоуважение (плюс).
 react — как сильно его задевают события: 0.7 толстокожий, 1 обычный, 1.4 оголённый нерв. recover — как быстро отходит: 0.6 долго носит в себе, 1 обычно, 1.6 отходчивый. grit — запас воли держать лицо и делать трудное: 0.7 мало, 1 обычно, 1.6 железная выдержка.
 sens — больные места, множитель от 0.6 до 1.5 (1 — как у всех; 1.5 — редкость, только для главной раны): warm — насколько на него действует тепло и похвала (ниже 1, если не верит хорошему о себе); threat — угроза и опасность; blow — удары по самооценке, стыд, напоминание о худшем в нём; bound — потеря контроля: решают за него, фиксируют, лишают выбора; wrong — несправедливость, ложь, задели близкого; loss — утрата, разлука, отвержение.
 Не преувеличивай: тяжёлое прошлое не значит, что он всё время на грани. Взрослый человек, который живёт с этим годами, в обычный день держится ровно.
 cass — кассеты: КАК ИМЕННО ОН ведёт себя на каждой ступени чувства, от слабой к сильной (fear — страх, anger — злость, shame — стыд и вина: по 4 ступени; low — тоска, tender — нежность: по 3; playful — кураж: 2). Каждая строка 10–28 слов: конкретные жесты, речь, привычки, что делает руками и голосом, куда уходит — ЕГО, из карточки и лорбука, а не «человек вообще». Не начинай строку с названия чувства. Ступени различаются и нарастают; сильная ступень — не истерика, если он не такой. Одной строкой: brk — как выглядит ЕГО срыв, когда запас кончился; hang — каким он бывает после срыва; care — как у него выглядит тревога за близкого (опека, контроль, проверки); night — каким он бывает утром после плохой ночи или кошмара; leak — как у него проступает то, что он прячет. Настоящее время, без имени в начале, без слова «ступень» и без цифр.
-fix — 3–6 вещей, которые возвращают его в себя, когда плохо (по 1–4 слова, из лорбука: голос близкого, счёт вслух, дело для рук, холодная вода…). beliefs — 1–3 глубинных убеждения о себе, с которыми он живёт и которые мешают принимать хорошее: t — его словами, 2–6 слов («я испорченный»); truth — что станет его правдой, если убеждение сломается, 3–10 слов. dates — дни в году, которые он помнит телом (годовщина гибели, день, когда всё сломалось): md — месяц и день «ММ-ДД», t — что это за день, 2–6 слов, kind — loss (утрата) или blow (вина, стыд). Только если в записях есть точные день и месяц; не выдумывай — иначе [].`;
+fix — 3–6 вещей, которые возвращают его в себя, когда плохо (по 1–4 слова, из лорбука: голос близкого, счёт вслух, дело для рук, холодная вода…). beliefs — 1–3 глубинных убеждения о себе, с которыми он живёт и которые мешают принимать хорошее: t — его словами, 2–6 слов («я испорченный»); truth — что станет его правдой, если убеждение сломается, 3–10 слов. dates — дни в году, которые он помнит телом (годовщина гибели, день, когда всё сломалось): md — месяц и день «ММ-ДД», t — что это за день, 2–6 слов, kind — loss (утрата) или blow (вина, стыд). Только если в записях есть точные день и месяц; не выдумывай — иначе [].
+want — насколько ему нужна каждая потребность, от 0.6 до 1.5 (1 — как всем): bond — близость и прикосновения; safe — безопасность и контроль над обстановкой; free — свобода решать самому; need — быть нужным и полезным; quiet — тишина и покой от людей (выше у замкнутых); novel — новизна и движение (выше у тех, кому скучно в покое).`;
 
 async function collect(who) {
     const name = A.canonName(who);
@@ -584,6 +640,7 @@ async function collect(who) {
         x.recover = P.clamp(j.recover ?? 1, 0.6, 1.6);
         x.grit = P.clamp(j.grit ?? 1, 0.7, 1.6);
         for (const k of Object.keys(x.sens)) x.sens[k] = P.clamp(j.sens?.[k] ?? 1, 0.6, 1.5);
+        for (const k of P.DRIVES) x.want[k] = P.clamp(j.want?.[k] ?? 1, 0.6, 1.5);
         const cass = cleanCass(j.cass);
         if (Object.keys(cass).length) x.cass = { ...x.cass, ...cass };
         // что возвращает, убеждения и даты: собранное не затирает то, что уже есть (ты могла править руками)
@@ -667,16 +724,32 @@ function logRow(e) {
     return `<div class="brn-log"><span>${head}</span><div><b>${esc(kinds || e.why || '')}</b>${kinds && e.why ? `<small>${esc(e.why)}</small>` : ''}${e.d ? `<small class="d">${esc(deltaText(e.d))}</small>` : ''}</div></div>`;
 }
 
-/** Что будет, если ничего не менять. */
-function foreHtml(v) {
-    if (v.s.brk) return '';
-    const f = P.forecast(v.s, v.t, loadOf(v.sig), v.sig.off);
-    const hrs = (h) => (h >= 48 ? `~${Math.round(h / 24)} дн.` : `~${h} ч`);
-    if (f.breakIn != null) return `<div class="brn-fore hot">⏳ Если ничего не изменится — срыв через ${hrs(f.breakIn)} истории: нагрузка копится быстрее, чем уходит.</div>`;
-    if (f.rawIn != null) return `<div class="brn-fore hot">⏳ Если ничего не изменится — через ${hrs(f.rawIn)} истории нервы станут сырыми: дальше любой сильный удар может сорвать.</div>`;
-    if (f.calmIn != null) return `<div class="brn-fore">⏳ Если не подливать — отпустит через ${hrs(f.calmIn)} истории.</div>`;
-    if (NEG.includes(v.dom.id)) return '<div class="brn-fore">⏳ Само не отпустит: держится на том, что давит сейчас.</div>';
-    return '';
+/** Подсказки игроку: что сработает, что добьёт, чего ждать. Модель их не видит. */
+function hintsHtml(v, who) {
+    const here = present();
+    const fore = v.s.brk ? {} : P.forecast(v.s, v.t, loadOf(v.sig), v.sig.off);
+    const h = hints({ s: v.s, t: v.t, dom: v.dom, leak: P.leakOf(v.s, v.sig.loose), fore, apart: !!here.length && !inScene(who, here) });
+    if (!h.help.length && !h.hurt.length && !h.expect.length) return '';
+    const grp = (cls, ico, title, rows) => (rows.length ? `<div class="brn-hint ${cls}"><b>${ico} ${title}</b>${rows.map(r => `<span>${esc(r)}</span>`).join('')}</div>` : '');
+    return `${A.sec('Подсказки тебе', 'модель их не видит')}<div class="brn-hints">${grp('ok', '✓', 'Сработает', h.help)}${grp('no', '✕', 'Добьёт', h.hurt)}${grp('eta', '⏳', 'Чего ждать', h.expect)}</div>`;
+}
+
+/** Потребности: шесть шкал «сыт — голоден» и то, что из них сейчас выходит. Тап — утолить. */
+function drivesHtml(v, who) {
+    return `${A.sec('Потребности', 'тап — утолить')}
+        <div class="brn-drs">${P.DRIVES.map(k => {
+            const x = v.s.dr[k], b = driveBand(x);
+            return `<button class="brn-dr b${b}" data-bact="feed" data-k="${k}" data-d="20" data-who="${esc(who)}"><span>${DRIVE_ICON[k]} ${DRIVE_NAME[k]}</span><i><u style="width:${Math.round(x)}%"></u></i><small>${BAND_NAME[b]}</small></button>`;
+        }).join('')}</div>
+        ${v.combo.length ? `<div class="lf-hint">Сейчас из этого выходит: ${esc(v.combo.slice(0, 2).map(c => c.t).join('; '))}.</div>` : ''}`;
+}
+
+/** Память с чувством: что запомнилось сильным и всплывает в тон настроению. */
+function marksHtml(s, who) {
+    const rows = arr(s.marks).slice(-6).reverse();
+    if (!rows.length) return '';
+    return `${A.sec('Память с чувством', 'всплывает в тон')}
+        <div class="brn-marks">${rows.map(m => `<div class="brn-mark"><span>${EMO_ICON[m.emo] || ''}</span><div><b>${esc(m.t)}</b><small>${esc(m.day || `#${m.mes}`)} · ${esc((EMO_TITLE[m.emo] || '').toLowerCase())}</small></div><button class="lf-iconbtn" data-bact="unmark" data-id="${esc(m.id)}" data-who="${esc(who)}">✕</button></div>`).join('')}</div>`;
 }
 
 /** Кардиограмма: тепло, самоценность и напряжение по дням истории. */
@@ -723,6 +796,8 @@ function temperHtml(who, t) {
         ${range(who, 'grit', t.grit, 0.4, 2, 0.1, 'Запас воли', 'сколько может держать лицо и как быстро она возвращается')}
         ${A.sec('Больные места', '1 — как у всех')}
         ${Object.keys(t.sens).map(k => range(who, `sens.${k}`, t.sens[k], 0.3, 2.5, 0.1, KIND_NAME[k])).join('')}
+        ${A.sec('Чего сколько надо', 'потребности')}
+        ${P.DRIVES.map(k => range(who, `want.${k}`, t.want[k], 0.4, 1.8, 0.1, `${DRIVE_ICON[k]} ${DRIVE_NAME[k]}`)).join('')}
         ${A.sec('Что возвращает', 'по одному на строку')}
         <div class="lf-field">${area('f', 'fix', 4, t.fix.join('\n'), 'её голос\nсчёт вслух\nдело для рук')}</div>
         ${A.sec('Убеждения', 'убеждение => что станет правдой')}
@@ -757,12 +832,14 @@ function cardHtml(who) {
         <div class="brn-axes">${P.AXES.map(a => axisRow(a, v)).join('')}</div>
         <div class="brn-two">${bar('Воля', s.will, `will b${band}`, WILL_NAME[band])}${bar('Напряжение', s.strain, `strain${s.strain >= 75 ? ' hot' : ''}`, s.strain >= 75 ? 'сырые нервы' : s.strain >= 50 ? 'копится' : '')}</div>
         ${bar('Несказанное', s.mask, `mask l${leak}`, LEAK_NAME[leak])}
-        ${foreHtml(v)}
+        ${hintsHtml(v, who)}
+        ${drivesHtml(v, who)}
         ${A.sec('Почему так')}
         ${sig.list.length ? `<div class="lf-chips wrap brn-sig">${sig.list.map(x => `<span class="lf-chip">${esc(x.text)}</span>`).join('')}</div>` : ''}
         ${logs.length ? `<div class="brn-logs">${logs.map(logRow).join('')}</div>` : `<div class="lf-hint">${sig.list.length ? '' : 'Пока ничего не случилось. '}События появятся после ответа: Летописец назовёт, что с ним произошло, а посчитает код.</div>`}
         ${beliefsHtml(v)}
         ${t.fix.length ? `${A.sec('Что возвращает')}<div class="lf-chips wrap brn-sig">${t.fix.map(f => `<span class="lf-chip">${esc(f)}</span>`).join('')}</div>` : ''}
+        ${marksHtml(s, who)}
         ${chartHtml(s)}
         ${A.sec('Руками', 'сдвинуть сейчас')}
         <div class="lf-chips wrap">${NUDGE.map(([k, l]) => `<button class="lf-chip" data-bact="nudge" data-k="${k}" data-who="${esc(who)}">${l}</button>`).join('')}<button class="lf-chip" data-bact="rest" data-who="${esc(who)}">дать выспаться</button></div>
@@ -833,7 +910,7 @@ function applyOp(s, t, op) {
     const mes = A.chatArr().length - 1;
     if (!s.at) s.at = nowStamp();
     if (op.act === 'nudge' && KIND_NAME[op.k]) {
-        const d = P.hit(s, { [op.k]: 2 }, t);
+        const d = { ...P.hit(s, { [op.k]: 2 }, t), ...driveHit(s, { [op.k]: 2 }, t) };
         log(s, { mes, src: 'hand', why: 'руками', hits: { [op.k]: 2 }, d });
         s.why = { t: '', mes, neg: P.NEGATIVE.includes(op.k) };
     }
@@ -843,7 +920,9 @@ function applyOp(s, t, op) {
         if (s.night) s.night.bad = false;
         log(s, { mes, src: 'hand', why: 'отдых: воля +40, напряжение −30' });
     }
-    if (op.act === 'reset') Object.assign(s, P.fresh(t), { at: nowStamp(), night: null, why: null, belBroke: null });
+    if (op.act === 'reset') Object.assign(s, P.fresh(t), { at: nowStamp(), night: null, why: null, belBroke: null, recall: null, dr: freshDrives() });
+    if (op.act === 'feed' && P.DRIVES.includes(op.k)) { healDrives(s); s.dr[op.k] = P.clamp(s.dr[op.k] + num(op.d), 0, 100); }
+    if (op.act === 'unmark') s.marks = s.marks.filter(x => x.id !== op.id);
     if (op.act === 'unbrk' && s.brk) {
         s.brk = null;
         s.strain = Math.min(s.strain, 70);
@@ -879,6 +958,8 @@ async function onClick(ev) {
         if (act === 'nudge' && KIND_NAME[el.dataset.k]) manual(who, { act: 'nudge', k: el.dataset.k });
         if (act === 'rest') manual(who, { act: 'rest' });
         if (act === 'reset') manual(who, { act: 'reset' });
+        if (act === 'feed') manual(who, { act: 'feed', k: el.dataset.k, d: Number(el.dataset.d) || 0 });
+        if (act === 'unmark') manual(who, { act: 'unmark', id: el.dataset.id });
         if (act === 'unbrk') { cancelBreak(who); return; }
         if (act === 'collect') {
             const run = async () => { await collect(who); };
@@ -1021,11 +1102,11 @@ globalThis.LifeBrain = {
     /** Состояние во «Внутри» ведёт мозг — Life не шлёт вторую заметку о нём. */
     owns: (who) => safe(() => on() && cfg().drive !== false && mine(who), false),
     list: () => safe(() => (on() ? list() : []), []),
-    /** { E: оси, emo: { id, step, lvl, name }, will, strain, mask, leak, brk, hang } или null */
+    /** { E: оси, emo: { id, step, lvl, name }, will, strain, mask, leak, brk, hang, dr: потребности, combo: [id] } или null */
     view: (who) => safe(() => {
         if (!on() || !mine(who)) return null;
         const v = view(who);
-        return { E: v.E, emo: { id: v.dom.id, step: v.dom.step, lvl: v.dom.lvl, name: domLabel(v.dom) }, will: Math.round(v.s.will), strain: Math.round(v.s.strain), mask: Math.round(v.s.mask), leak: P.leakOf(v.s, v.sig.loose), brk: !!v.s.brk, hang: !!v.s.hang };
+        return { E: v.E, emo: { id: v.dom.id, step: v.dom.step, lvl: v.dom.lvl, name: domLabel(v.dom) }, will: Math.round(v.s.will), strain: Math.round(v.s.strain), mask: Math.round(v.s.mask), leak: P.leakOf(v.s, v.sig.loose), brk: !!v.s.brk, hang: !!v.s.hang, dr: Object.fromEntries(P.DRIVES.map(k => [k, Math.round(v.s.dr[k])])), combo: v.combo.map(c => c.id) };
     }, null),
     /** Нервы сырые — сработавший триггер бьёт на ступень сильнее (triggers.js). */
     raw: (who) => safe(() => on() && mine(who) && P.rawNerves(view(who).s), false),
