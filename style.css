@@ -197,3 +197,9 @@
 .brn-near { margin: 8px 0 0; padding: 10px 12px; border-radius: 14px; border: 1px dashed rgba(201, 138, 155, .55); background: rgba(201, 138, 155, .08); }
 .brn-near b { display: block; font: 600 13.5px var(--lf-sans); color: var(--lf-text); }
 .brn-near small { display: block; margin: 3px 0 8px; font-size: 12.5px; line-height: 1.4; color: var(--lf-dim); }
+
+/* 0.13: общий блок «Расстановка этого чата» */
+.brn-cast { margin: 12px 0 2px; padding: 12px 14px; border-radius: 16px; border: 1px solid var(--lf-line, rgba(255, 255, 255, .1)); background: rgba(255, 255, 255, .03); }
+.brn-cast b { display: block; font: 600 14px var(--lf-sans); color: var(--lf-text); }
+.brn-cast small { display: block; margin-top: 3px; font-size: 12.5px; line-height: 1.4; color: var(--lf-dim); }
+.brn-cast .lf-chips { margin: 9px 0 4px; }

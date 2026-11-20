@@ -1524,7 +1524,7 @@ test('0.11: расстановку делает ИИ — весь состав �
     st.pins = {};
     await fresh(11100);
     assert.deepEqual(st.md.brain.pairs, [], 'само ничего не сеется');
-    assert.match(st.shelf.tracker.html(), /Расставить по истории/);
+    assert.match(st.shelf.tracker.html(), /Расстановка этого чата<\/b><small>Ещё не было\.[\s\S]*Расставить весь состав — ИИ/);
     const hadStory = st.story;
     st.story = st.story || { felt: [] };
     const nowStyle = st.ext.brain.prof[B].attach;
@@ -1890,4 +1890,107 @@ test('0.12: «связь сравнялась» — мозг говорит и �
     assert.equal(st.md.brain.pairs[0].near, undefined);
     delete st.rel['баки>хеди']; delete st.rel['хеди>баки'];
     st.md.brain.pairs = []; st.pins = {}; st.md.brain.circlePins = [];
+});
+
+// ───────────── 0.13 ─────────────
+test('0.13: готовая расстановка — файл рядом с расширением: кладётся сама, без запроса к ИИ; дальше — как после ИИ', async () => {
+    const ready = { v: 1, name: 'проба', at: '2024-01-01', sets: [
+        { id: 'past', era: 'past', people: [{ name: 'Баки Барнс', attach: 'serve', reject: 1.1, booze: 1, why: 'из прошлого' }, { name: 'Наташа Романофф', attach: 'serve' }], pairs: [] },
+        { id: 'main', era: 'now', people: [
+            { name: 'Баки Барнс', attach: 'guard', reject: 1.6, booze: 4, why: 'забота как охрана' }, { name: 'Наташа Романофф', attach: 'armor', reject: 1.4, booze: 1.3, why: 'на длину руки' },
+            { name: 'Хеди Барлоу', booze: 1.6 }, { name: 'Кого здесь нет', attach: 'fix' }],
+        pairs: [
+            { a: 'Хеди Барлоу', b: 'Баки Барнс', trope: 'hybrid', rom: 'yes', own: 'both', fact: 'пережили друг друга и остались', why: 'равные' },
+            { a: 'Баки Барнс', b: 'Наташа Романофф', trope: '', rom: 'no', own: 'a', fact: 'вытаскивал её не раз', why: 'троп не выбран' },
+            { a: 'Хеди Барлоу', b: 'Наташа Романофф', trope: '', rom: 'no', own: 'none', why: 'ни тропа, ни «намертво» — такая строка не нужна' },
+            { a: 'Хеди Барлоу', b: 'Кого здесь нет', trope: 'kin', own: 'both', fact: 'не из этого чата' }] },
+    ] };
+    const realFetch = globalThis.fetch;
+    let hits = 0;
+    globalThis.fetch = async (u) => { hits++; return /cast\.json$/.test(String(u)) ? { ok: true, json: async () => JSON.parse(JSON.stringify(ready)) } : { ok: false }; };
+    st.md.brain.circle = []; st.md.brain.circleAuto = false; st.md.brain.pairs = []; st.pins = {}; st.md.brain.circlePins = [];
+    delete st.md.brain.bondsAt; delete st.md.brain.bondsTried; delete st.md.brain.castFrom; delete st.md.brain.meTol; delete st.md.brain.meTolBy;
+    Object.assign(st.ext.brain.prof[B], { attach: 'fix', reject: 1, booze: 1, styleBy: '', seeded: 8 });      // как после старых таблиц
+    Object.assign(st.ext.brain.prof[N], { attach: 'test', styleBy: 'hand' });                                   // а это вписано руками
+    await fresh(13000);
+    st.ext.brain.auto = false;                                  // запросов нет — автосбор тут ни при чём
+    st.ext.brain.tried = {};
+    await brain.cast(true);
+    const castAsks = () => st.deep.concat(st.fill).filter(x => /расставляешь для «код-мозга»/.test(x.messages?.[0]?.content || '')).length;
+    const before = castAsks(), toasts = st.toasts.length;
+    await brain.ensure();
+    assert.ok(hits >= 1);
+    assert.equal(castAsks(), before, 'запроса к ИИ на расстановку не было');
+    st.ext.brain.auto = true;
+    assert.deepEqual(st.md.brain.pairs, [
+        { a: 'Хеди Барлоу', b: 'Баки Барнс', id: 'hybrid', rom: 'yes', own: 'both', why: 'равные', fact: 'пережили друг друга и остались', by: 'ai', src: 'ready' },
+        { a: 'Баки Барнс', b: 'Наташа Романофф', id: '', rom: 'no', own: 'a', why: 'троп не выбран', fact: 'вытаскивал её не раз', by: 'ai', src: 'ready' },
+    ]);
+    assert.equal(st.md.brain.castFrom, 'ready:main@1');
+    assert.equal(st.md.brain.bondsStory, true);
+    const pb = st.ext.brain.prof[B];
+    assert.deepEqual([pb.attach, pb.reject, pb.booze, pb.styleBy, pb.styleSrc, pb.seeded], ['guard', 1.6, 4, 'ai', 'ready', undefined], 'старые таблицы заменены');
+    assert.equal(st.ext.brain.prof[N].attach, 'test', 'вписанное руками готовая расстановка не трогает');
+    assert.deepEqual([st.md.brain.meTol, st.md.brain.meTolBy], [1.6, 'ai']);
+    assert.deepEqual(Object.keys(st.pins).sort(), ['баки>наташа', 'баки>хеди', 'хеди>баки'], 'в настоящем «намертво» запирает шкалы — по направлениям');
+    assert.ok(st.toasts.slice(toasts).some(t => /Готовая расстановка на месте — без запроса к ИИ\. Расставлено по истории: связей — 2, намертво — 2/.test(t[1])));
+    const again = st.asked;
+    await brain.ensure();
+    assert.equal(st.asked, again, 'второй раз ничего не делает');
+    let html = st.shelf.tracker.html();
+    assert.match(html, /Расстановка этого чата<\/b><small>Готовая \(«проба»\), [^:]+: связей — 2, намертво — 2\./);
+    assert.match(html, /Вернуть готовую/);
+    assert.match(html, /Расставлено заранее: равные/);
+    assert.match(html, /Привязывается: сторож[\s\S]*Расставлено заранее: забота как охрана/);
+    // её правка остаётся при новой версии готовой; остальное обновляется само
+    change({ bin: 'rom', who: B, to: 'Хеди Барлоу' }, 'hint', { tagName: 'SELECT' });
+    ready.v = 2;
+    ready.sets[1].pairs[1].own = 'both';
+    ready.sets[1].people[0].reject = 1.5;
+    await brain.cast(true);
+    await brain.ensure();
+    assert.equal(st.md.brain.castFrom, 'ready:main@2');
+    assert.equal(st.md.brain.pairs.find(p => p.b === 'Баки Барнс' && p.a === 'Хеди Барлоу').rom, 'hint');
+    assert.equal(st.md.brain.pairs.find(p => p.b === 'Наташа Романофф').own, 'both');
+    assert.equal(st.ext.brain.prof[B].reject, 1.5);
+    // потом модель переставляет — и новая версия готовой сама поверх ИИ уже не ложится
+    st.depth = { people: [{ name: 'Баки Барнс', attach: 'fuse', reject: 1.2, booze: 3, why: 'ИИ решил иначе' }], pairs: [{ a: 'Баки Барнс', b: 'Наташа Романофф', trope: 'comrades', rom: 'no', own: 'none', why: 'служат вместе' }] };
+    await click({ bact: 'bonds-fill', who: B });
+    assert.equal(st.md.brain.castFrom, 'ai');
+    assert.equal(st.ext.brain.prof[B].attach, 'fuse');
+    assert.equal(st.md.brain.pairs.find(p => p.b === 'Наташа Романофф').id, 'comrades');
+    assert.match(st.shelf.tracker.html(), /Сделал ИИ, [^:]+: связей — 2[\s\S]*Взять готовую/);
+    ready.v = 3;
+    await brain.cast(true);
+    await brain.ensure();
+    assert.equal(st.md.brain.castFrom, 'ai');
+    assert.equal(st.ext.brain.prof[B].attach, 'fuse');
+    // но кнопкой её можно вернуть
+    await click({ bact: 'bonds-ready', who: B });
+    assert.equal(st.md.brain.castFrom, 'ready:main@3');
+    assert.equal(st.ext.brain.prof[B].attach, 'guard');
+    assert.equal(st.md.brain.pairs.find(p => p.b === 'Наташа Романофф').id, '');
+    // чат прошлой эпохи: подходит только набор этой эпохи, замков нет
+    globalThis.SacredTimeline = pastEra;
+    await eraWait();
+    delete st.md.brain.bondsAt; delete st.md.brain.castFrom; st.md.brain.pairs = [];
+    delete st.ext.brain.prof[`${B}@past`]; delete st.ext.brain.prof[`${N}@past`];
+    st.depth = null;
+    await brain.ensure();
+    assert.equal(st.md.brain.castFrom, 'ready:past@3');
+    assert.equal(st.ext.brain.prof[`${B}@past`].attach, 'serve');
+    assert.deepEqual(st.pins, {});
+    delete st.ext.brain.prof[`${B}@past`]; delete st.ext.brain.prof[`${N}@past`];
+    delete globalThis.SacredTimeline;
+    await eraWait();
+    // файла нет — всё как раньше
+    globalThis.fetch = async () => ({ ok: false });
+    await brain.cast(true);
+    delete st.md.brain.castFrom;
+    assert.ok(!/готовую/.test(st.shelf.tracker.html()));
+    globalThis.fetch = realFetch;
+    await brain.cast(true);
+    st.ext.brain.auto = false;
+    Object.assign(st.ext.brain.prof[N], { styleBy: '' });
+    st.md.brain.pairs = []; st.pins = {}; st.md.brain.circlePins = []; delete st.md.brain.bondsAt; delete st.md.brain.meTol; delete st.md.brain.meTolBy;
 });
