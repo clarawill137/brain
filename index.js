@@ -13,7 +13,7 @@ import { SOFT, tie, pairStats, lens, haven, afterHurt, stayStyle, grudgeDecay } 
 import { STYLES, STYLE_IDS, styleId, styleLine, TROPES, TROPE_IDS, ROM_NAME, tropeLine, tropeMul, rejectOf, SPINE_KEYS, SPINE_NAME, hasSpine, spineLine } from './core/attach.js';
 import { STAGE_NAME, stageOf, tolOf, drink, sober, boozeNow, DRUNK, HUNG, SEEN, SEEN_HUNG, playerTips } from './core/booze.js';
 
-const VERSION = '0.8.2';
+const VERSION = '0.8.3';
 const ID = 'brain';
 const TITLE = '🧠 Мозг';
 const NARR = /рассказчик|narrator|мастер|game ?master|(^|[^a-z])gm([^a-z]|$)|мнемозина/i;
@@ -109,14 +109,64 @@ function M() {
 const saveM = () => { try { ctx().saveMetadataDebounced?.(); } catch { /* */ } };
 
 /**
+ * Чат — в прошлом истории: эпоха ядра «Священный таймлайн» закрыта (у неё есть конец). Там отношения ещё только
+ * складываются: в одной эпохе едва встретились, в другой один уже любит, а второй только начинает. Ядра нет или
+ * чат вне мира — не прошлое. Снимок ядра помним полсекунды: круг спрашивают на каждом шагу.
+ */
+let eraMemo = { at: 0, past: false };
+function pastEra() {
+    if (Date.now() - eraMemo.at > 500) eraMemo = { at: Date.now(), past: safe(() => { const e = globalThis.SacredTimeline?.context?.()?.era; return !!(e && e.to); }, false) };
+    return eraMemo.past;
+}
+const sameList = (a, b) => a.length === b.length && a.every((x, k) => x === b[k]);
+const nm = (v) => (A.norm ? A.norm(A.canonName(v)) : String(A.canonName(v) ?? '').toLowerCase().replace(/ё/g, 'е').trim());
+const dirKey = (a, b) => `${nm(a)}>${nm(b)}`;   // как у Life (dirKey в index.js)
+/** Снять свои замки (любовь и близость по сто), которые syncCircle поставил в этом чате. */
+function unpinOwn(m) {
+    for (const k of Array.isArray(m.circlePins) ? m.circlePins : []) {
+        const [a, b] = String(k).split('>');
+        if (!a || !b) continue;
+        safe(() => {
+            // только то, что всё ещё стоит на ста: замок, который она потом переставила руками, — уже её
+            const pins = safe(() => A.chatMeta().relPin, null), p = pins?.[k];
+            if (!p) return A.relUnpin ? A.relUnpin(a, b, ['love', 'closeness']) : false;   // замка под этим ключом не видно — пусть Life разберёт сам
+            const mine = ['love', 'closeness'].filter(f => p[f] === 100);
+            if (!mine.length) return false;
+            if (A.relUnpin) return A.relUnpin(a, b, mine);
+            for (const f of mine) delete p[f];
+            if (!Object.keys(p).length) delete pins[k];
+            return true;
+        });
+    }
+    m.circlePins = [];
+}
+
+/**
  * Круг «своих» этого чата: между ними привязанность космическая — что бы ни случилось, она не меняется.
- * Первый раз заполняется сам, если в чате есть хотя бы двое из известной пятёрки; дальше — как поправишь.
+ * Первый раз заполняется сам, если в чате есть хотя бы двое из известной пятёрки, — но только в настоящем истории:
+ * в чате прошлой эпохи круг сам не заполняется и ничего не запирает (впиши руками, если там уже так; одностороннее
+ * «она любит, он только начинает» — замком шкалы на одну сторону в Life). Дальше — как поправишь.
  */
 function circle() {
     const m = M();
     if (!Array.isArray(m.circle)) {
         const cast = [user(), ...safe(() => A.groupMembers().map(A.canonName), [])].filter(Boolean);
-        m.circle = SEED_CIRCLE.filter(n => cast.some(c => A.sameName(c, n))).length >= 2 ? [...SEED_CIRCLE] : [];
+        const seed = !pastEra() && SEED_CIRCLE.filter(n => cast.some(c => A.sameName(c, n))).length >= 2;
+        m.circle = seed ? [...SEED_CIRCLE] : [];
+        m.circleAuto = seed;
+    }
+    // ядро назвало эпоху позже, чем круг заполнился сам (или его заполнила версия 0.7.0, не знавшая про эпохи)
+    if (m.circle.length && pastEra() && (m.circleAuto === true || (m.circleAuto === undefined && sameList(m.circle, SEED_CIRCLE)))) {
+        const legacy = m.circleAuto === undefined;
+        unpinOwn(m);
+        m.circle = [];
+        m.circleAuto = false;
+        // тропы пар сеялись вместе с кругом: нетронутые — убрать (они про настоящее), правленые руками — оставить
+        if (Array.isArray(m.pairs) && m.pairs.length === SEED_PAIRS.length && m.pairs.every((x, k) => x && x.a === SEED_PAIRS[k][0] && x.b === SEED_PAIRS[k][1] && x.id === SEED_PAIRS[k][2] && x.rom === SEED_PAIRS[k][3])) m.pairs = [];
+        relCache.clear();
+        saveM(); safe(() => A.saveMeta?.()); safe(() => A.updatePrompt());
+        // старая версия своих замков не помнила: снять их за неё нельзя — можно задеть поставленные руками
+        if (legacy) safe(() => A.toast('info', 'Это чат прошлой эпохи: круг «своих» здесь сам не заполняется. Если любовь и близость уже заперты на 100 — сними лишние замки в «Персонаж → Связи».', '✦ Мозг', { timeOut: 9000 }));
     }
     return m.circle;
 }
@@ -124,10 +174,17 @@ const inCircle = (n) => !!n && circle().some(x => A.sameName(x, n));
 /** В Life «свои» получают любовь и близость по сто под замком — в обе стороны (только те, кто есть в этом чате). */
 function syncCircle() {
     if (!A.relPin) return 0;
+    const m = M();
     const cast = [user(), ...safe(() => A.groupMembers().map(A.canonName), [])].filter(n => n && !NARR.test(n) && inCircle(n));
     let n = 0;
-    for (const a of cast) for (const b of cast) if (!A.sameName(a, b) && safe(() => A.relPin(a, b, { love: 100, closeness: 100 }), false)) n++;
-    if (n) { relCache.clear(); safe(() => A.saveMeta?.()); safe(() => A.updatePrompt()); }
+    for (const a of cast) for (const b of cast) {
+        if (A.sameName(a, b) || !safe(() => A.relPin(a, b, { love: 100, closeness: 100 }), false)) continue;
+        n++;
+        const k = dirKey(a, b);
+        if (!Array.isArray(m.circlePins)) m.circlePins = [];
+        if (!m.circlePins.includes(k)) m.circlePins.push(k);
+    }
+    if (n) { relCache.clear(); saveM(); safe(() => A.saveMeta?.()); safe(() => A.updatePrompt()); }
     return n;
 }
 
@@ -136,7 +193,8 @@ function syncCircle() {
  */
 function pairs() {
     const m = M();
-    if (!Array.isArray(m.pairs)) m.pairs = circle().length ? SEED_PAIRS.map(([a, b, id, rom]) => ({ a, b, id, rom })) : [];
+    // в чате прошлой эпохи тропы сами не сеются: там эти двое могли ещё и не встретиться
+    if (!Array.isArray(m.pairs)) m.pairs = circle().length && !pastEra() ? SEED_PAIRS.map(([a, b, id, rom]) => ({ a, b, id, rom })) : [];
     return m.pairs;
 }
 const pairOf = (a, b) => (a && b ? pairs().find(p => (A.sameName(p.a, a) && A.sameName(p.b, b)) || (A.sameName(p.a, b) && A.sameName(p.b, a))) || null : null);
@@ -1662,7 +1720,7 @@ function onChange(ev) {
         if (kind === 'sp' && SPINE_KEYS.includes(k)) editTemper(who, (t) => { t.spine[k] = str(String(el.value || '').replace(/\s+/g, ' '), 180); t.v = TEMPER_V; });
         if (kind === 'tr') setPair(who, el.dataset.to, { id: TROPES[el.value] ? el.value : '' });
         if (kind === 'rom' && pairOf(who, el.dataset.to)) setPair(who, el.dataset.to, { rom: ROM_NAME[el.value] ? el.value : 'no' });
-        if (kind === 'circle') { M().circle = linesOf(el.value).map(x => str(x, 40)).filter(Boolean).slice(0, 12); saveM(); relCache.clear(); syncCircle(); }
+        if (kind === 'circle') { M().circle = linesOf(el.value).map(x => str(x, 40)).filter(Boolean).slice(0, 12); M().circleAuto = false; saveM(); relCache.clear(); syncCircle(); }   // вписано руками — эпоха круг больше не чистит
         if (kind === 'f') editTemper(who, (t) => { t.fix = linesOf(el.value); t.src = 'hand'; });
         if (kind === 'b') {
             editTemper(who, (t) => {

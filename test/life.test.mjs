@@ -54,6 +54,7 @@ const api = {
     },
     story: { ready: () => !!st.story, felt: (who, w = 2) => (st.story?.felt || []).filter(f => f.w >= w) },
     relPin: (a, b, v) => { const k = `${first(a)}>${first(b)}`; if (st.pins[k]) return false; st.pins[k] = v; return true; },
+    relUnpin: (a, b) => { const k = `${first(a)}>${first(b)}`; if (!st.pins[k]) return false; delete st.pins[k]; return true; },
     askFillJson: async (messages, tokens, o, opts) => { st.fill.push({ messages, tokens, opts }); return api.askJson(); },
     lore: { about: async () => 'Лор о нём.', card: () => 'Карточка.', core: () => '• говорит коротко', key: (w) => String(w).trim(), coreAdd: (who, line) => { st.core.push([who, line]); return true; } },
     shelf: { tracker: (t) => { st.shelf.tracker = t; return true; }, mind: (f) => { st.shelf.mind = f; }, recs: (f) => { st.shelf.recs = f; }, open() {} },
@@ -1213,4 +1214,79 @@ test('0.8.2: персонаж игрока — мозг считает толь�
     mechSet('booze', true);
     delete st.md.brain.me;
     st.md.brain.circle = [];
+});
+
+// ───── 0.8.3: эпохи — «свои» сами только в настоящем истории ─────
+
+const eraWait = () => new Promise(r => setTimeout(r, 520));   // снимок эпохи мозг помнит полсекунды
+const pastEra = { context: () => ({ era: { id: 'past', from: '1943-10', to: '1945-03' } }) };
+const openEra = { context: () => ({ era: { id: 'now', from: '2024-01', to: null } }) };
+let seededPairs = [];
+
+test('0.8.3: в чате прошлой эпохи круг сам не заполняется и ничего не запирает; вписанное руками — остаётся', async () => {
+    delete st.md.brain.circle; delete st.md.brain.circleAuto; delete st.md.brain.pairs; st.md.brain.circlePins = []; st.pins = {};
+    globalThis.SacredTimeline = pastEra;
+    await eraWait();
+    await fresh(6010);
+    st.shelf.tracker.html();
+    assert.deepEqual(st.md.brain.circle, [], 'в прошлом «своих» по умолчанию нет');
+    brain.view(B);
+    assert.deepEqual(st.md.brain.pairs ?? [], [], 'и тропы пар сами не сеются: там эти двое могли ещё не встретиться');
+    assert.deepEqual(Object.keys(st.pins), [], 'и ни одного замка');
+    assert.notEqual(brain.view(B).dear?.cosmic, true, 'привязанность там обычная: её ещё растить');
+    change({ bin: 'circle' }, 'Хеди\nБаки', { tagName: 'TEXTAREA' });
+    assert.deepEqual(st.md.brain.circle, ['Хеди', 'Баки']);
+    assert.deepEqual(Object.keys(st.pins).sort(), ['баки>хеди', 'хеди>баки']);
+    await fresh(6011);
+    st.shelf.tracker.html();
+    assert.deepEqual(st.md.brain.circle, ['Хеди', 'Баки'], 'вписала руками — эпоха круг не чистит');
+    delete st.md.brain.pairs;
+    brain.view(B);
+    assert.deepEqual(st.md.brain.pairs ?? [], [], 'круг вписан руками — тропы настоящего всё равно не подсовываются');
+    delete globalThis.SacredTimeline;
+    await eraWait();
+});
+
+test('0.8.3: в настоящем истории (открытая эпоха) круг заполняется, как раньше', async () => {
+    delete st.md.brain.circle; delete st.md.brain.circleAuto; st.md.brain.circlePins = []; st.pins = {};
+    globalThis.SacredTimeline = openEra;
+    await eraWait();
+    await fresh(6020);
+    st.shelf.tracker.html();
+    assert.deepEqual(st.md.brain.circle, ['Хеди', 'Баки', 'Наташа', 'Тони', 'Елена']);
+    assert.equal(st.md.brain.circleAuto, true);
+    delete st.md.brain.pairs;
+    brain.view(B);
+    assert.ok(st.md.brain.pairs.length >= 2 && st.md.brain.pairs.some(x => x.a === 'Хеди' && x.b === 'Баки'), 'в настоящем тропы пар сеются вместе с кругом');
+    seededPairs = JSON.parse(JSON.stringify(st.md.brain.pairs));
+    delete globalThis.SacredTimeline;
+    await eraWait();
+});
+
+test('0.8.3: круг заполнился сам, а ядро назвало прошлую эпоху позже — круг очищается, свои замки снимаются, чужие нет', async () => {
+    st.md.brain.circle = ['Хеди', 'Баки', 'Наташа', 'Тони', 'Елена']; st.md.brain.circleAuto = true;
+    st.md.brain.circlePins = ['баки барнс>хеди барлоу'];
+    st.pins = { 'баки>хеди': { love: 100, closeness: 100 }, 'хеди>баки': { love: 100, closeness: 100 } };   // вторую сторону заперла она сама
+    st.md.brain.pairs = JSON.parse(JSON.stringify(seededPairs));
+    globalThis.SacredTimeline = pastEra;
+    await eraWait();
+    st.shelf.tracker.html();
+    assert.deepEqual(st.md.brain.circle, []);
+    assert.equal(st.md.brain.circleAuto, false);
+    assert.deepEqual(st.md.brain.pairs, [], 'тропы, посеянные вместе с кругом, ушли с ним');
+    assert.deepEqual(Object.keys(st.pins), ['хеди>баки'], 'снят только замок, который ставил мозг: «она уже любит, он только начинает»');
+    // версия 0.7.0 замков не помнила: круг чистим, замки не трогаем, говорим об этом
+    st.md.brain.circle = ['Хеди', 'Баки', 'Наташа', 'Тони', 'Елена']; delete st.md.brain.circleAuto; delete st.md.brain.circlePins;
+    st.pins = { 'баки>хеди': { love: 100, closeness: 100 } };
+    st.md.brain.pairs = JSON.parse(JSON.stringify(seededPairs)); st.md.brain.pairs[0].rom = 'hint';   // троп правили руками
+    const n = st.toasts.length;
+    st.shelf.tracker.html();
+    assert.deepEqual(st.md.brain.circle, []);
+    assert.equal(st.md.brain.pairs.length, seededPairs.length, 'тропы, которые правили руками, эпоха не трогает');
+    assert.deepEqual(Object.keys(st.pins), ['баки>хеди'], 'чужой или старый замок не снимается молча');
+    assert.equal(st.toasts.length, n + 1);
+    assert.match(st.toasts[n][1], /прошлой эпохи/);
+    delete globalThis.SacredTimeline;
+    st.md.brain.circle = []; st.md.brain.circleAuto = false; st.pins = {}; st.md.brain.pairs = [];
+    await eraWait();
 });
