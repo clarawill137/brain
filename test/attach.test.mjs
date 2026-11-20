@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as P from '../core/psyche.js';
-import { STYLES, STYLE_IDS, styleId, styleLine, TROPES, TROPE_IDS, tropeLine, tropeMul, rejectOf, normSpine, hasSpine, spineLine } from '../core/attach.js';
+import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, tropeLine, tropeMul, rejectOf, normSpine, hasSpine, spineLine } from '../core/attach.js';
 import { tie, pairStats, lens, afterHurt } from '../core/bonds.js';
 import { combos } from '../core/drives.js';
 import { hints } from '../core/hints.js';
@@ -300,4 +300,46 @@ test('персонаж игрока: что видно со стороны и п
     assert.match(playerTips({ bac: 50, bacPeak: 50 }, 4).join('|'), /похмелья не будет/);
     assert.match(playerTips({ bac: 0, hung: { lvl: 1, left: 7.4 } }, 1).join('|'), /похмелье ещё ~7 ч истории/);
     assert.deepEqual(playerTips({ bac: 0 }, 1), []);
+});
+
+// ───────────── 0.9 ─────────────
+
+test('что с кем работает: у каждого способа — своя подсказка; несогласие выходит по-разному', () => {
+    for (const id of STYLE_IDS.filter(x => x !== 'secure')) {
+        assert.ok(STYLE_EASE[id].length > 30, id);
+        assert.ok(['mute', 'cold', 'fight', 'control'].includes(STYLE_OBJECT[id]), id);
+    }
+    assert.equal(STYLE_EASE.secure, undefined);
+    const s = () => ({ ...P.fresh(), dr: { bond: 60, safe: 60, free: 60, need: 60, quiet: 60, novel: 60 } });
+    const dom = { id: '', step: 0 };
+    assert.match(combos({ s: s(), dom, mute: 'mute' }).find(c => c.id === 'mute').t, /возражение застревает в горле/);
+    assert.match(combos({ s: s(), dom, mute: 'cold' }).find(c => c.id === 'mute').t, /холодную вежливость/);
+    assert.match(combos({ s: s(), dom, mute: 'fight' }).find(c => c.id === 'mute').t, /колкостью не по делу/);
+    assert.match(combos({ s: s(), dom, mute: 'control' }).find(c => c.id === 'mute').t, /обходной план/);
+    assert.ok(!combos({ s: s(), dom }).some(c => c.id === 'mute'));
+    assert.match(combos({ s: s(), dom, dare: true }).find(c => c.id === 'dare').t, /поднимает ставку/);
+    assert.ok(!combos({ s: s(), dom: { id: 'fear', step: 2 }, dare: true }).some(c => c.id === 'dare'), 'когда страшно — не до азарта');
+    const base = { s: s(), t: P.normTemper(), dom: { id: 'anger', step: 2 }, fore: {} };
+    const h = hints({ ...base, ease: STYLE_EASE.guard, mute: 'mute' }).help.join('|');
+    assert.match(h, /с ним работает: не требовать слов о чувствах/);
+    assert.match(h, /молчит из преданности/);
+    assert.ok(!/с ним работает/.test(hints({ ...base, dom: { id: '', step: 0 }, ease: STYLE_EASE.guard }).help.join('|')), 'когда всё ровно — подсказка не нужна');
+});
+
+test('качели статуса: уверенного придавило — видно; тихого вынесло наверх — тоже; середина не качается', () => {
+    assert.equal(statusHabit({ base: { ctl: 5, wor: 0 } }, 'fix'), 'high');
+    assert.equal(statusHabit({ base: { ctl: -6, wor: -10 } }, 'serve'), 'low');
+    assert.equal(statusHabit({ base: { ctl: 0, wor: 0 } }, 'guard'), '');
+    assert.equal(statusHabit({ base: { ctl: 20, wor: 0 } }, ''), 'high');
+    assert.equal(statusFlip('high', { id: 'shame', step: 2 }), 'drop');
+    assert.equal(statusFlip('high', { id: 'fear', step: 3 }), 'drop');
+    assert.equal(statusFlip('high', { id: 'shame', step: 1 }), '', 'первая ступень позу не ломает');
+    assert.equal(statusFlip('high', { id: 'anger', step: 3 }), '', 'злость уверенного — не падение');
+    assert.equal(statusFlip('low', { id: 'anger', step: 2 }), 'rise');
+    assert.equal(statusFlip('low', { id: '', step: 0 }, true), 'rise');
+    assert.equal(statusFlip('low', { id: 'shame', step: 3 }), '');
+    assert.equal(statusFlip('', { id: 'shame', step: 3 }), '');
+    const s = { ...P.fresh(), dr: { bond: 60, safe: 60, free: 60, need: 60, quiet: 60, novel: 60 } };
+    assert.match(combos({ s, dom: { id: 'shame', step: 2 }, status: 'drop' }).find(c => c.id === 'drop').t, /привычная уверенность слетела/);
+    assert.match(combos({ s, dom: { id: '', step: 0 }, status: 'rise' }).find(c => c.id === 'rise').t, /непривычно выпрямляется/);
 });

@@ -10,10 +10,10 @@ import { EMO_NAME, EMO_TITLE, EMO_ICON, WILL_TEXT, WILL_NAME, SINGLES, SINGLE_TI
 import { DRIVE_NAME, DRIVE_ICON, BAND_NAME, freshDrives, healDrives, driveHit, driveDecay, driveBand, combos } from './core/drives.js';
 import { hints } from './core/hints.js';
 import { SOFT, tie, pairStats, lens, haven, afterHurt, stayStyle, grudgeDecay } from './core/bonds.js';
-import { STYLES, STYLE_IDS, styleId, styleLine, TROPES, TROPE_IDS, ROM_NAME, tropeLine, tropeMul, rejectOf, SPINE_KEYS, SPINE_NAME, hasSpine, spineLine } from './core/attach.js';
+import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, ROM_NAME, tropeLine, tropeMul, rejectOf, SPINE_KEYS, SPINE_NAME, hasSpine, spineLine } from './core/attach.js';
 import { STAGE_NAME, stageOf, tolOf, drink, sober, boozeNow, DRUNK, HUNG, SEEN, SEEN_HUNG, playerTips } from './core/booze.js';
 
-const VERSION = '0.8.3';
+const VERSION = '0.9.0';
 const ID = 'brain';
 const TITLE = '🧠 Мозг';
 const NARR = /рассказчик|narrator|мастер|game ?master|(^|[^a-z])gm([^a-z]|$)|мнемозина/i;
@@ -31,7 +31,7 @@ const MAIN_AX = { fear: 'ctl', anger: 'val', shame: 'wor', low: 'val' };
 const NUDGE = [['warm', 'обогреть'], ['fun', 'рассмешить'], ['calm', 'успокоить'], ['win', 'дать победить'], ['open', 'дать выговориться'], ['threat', 'напугать'], ['blow', 'задеть'], ['bound', 'прижать'], ['wrong', 'разозлить'], ['loss', 'оставить в одиночестве']];
 const LEAK_NAME = ['держит при себе', 'проступает', 'почти не держит'];
 // механизмы, которые можно выключить по одному и посмотреть, что изменится
-const MECH = [['style', 'Как привязывается и тропы пар', 'у каждого свой способ привязываться, у пары — свой сценарий'], ['spine', 'Стержень', 'чего добивается по его мнению и что ему нужно на самом деле'], ['booze', 'Алкоголь и похмелье', 'стадии опьянения, близорукость, утро после'], ['lens', 'Линза привязанности', 'любовь размывает мелкое плохое, уход и соперник бьют больнее'], ['dom', 'Доминанта', 'чувство держится и стягивает в себя постороннее'], ['catch', 'Заражение', 'близкие в сцене тянут друг друга'], ['recall', 'Память с чувством', 'прежнее всплывает в тон и возвращает часть себя'], ['home', 'Погода дома', 'свои на нервах — всем тяжелее'], ['wit', 'Юмор', 'каким юмором шутит в этом состоянии'], ['seq', 'Сцена и отклик', 'после сильного события: сначала реакция, потом развилка, потом решение']];
+const MECH = [['status', 'Качели статуса', 'когда привычная уверенность слетает или тихий вдруг выпрямляется'], ['style', 'Как привязывается и тропы пар', 'у каждого свой способ привязываться, у пары — свой сценарий'], ['spine', 'Стержень', 'чего добивается по его мнению и что ему нужно на самом деле'], ['booze', 'Алкоголь и похмелье', 'стадии опьянения, близорукость, утро после'], ['lens', 'Линза привязанности', 'любовь размывает мелкое плохое, уход и соперник бьют больнее'], ['dom', 'Доминанта', 'чувство держится и стягивает в себя постороннее'], ['catch', 'Заражение', 'близкие в сцене тянут друг друга'], ['recall', 'Память с чувством', 'прежнее всплывает в тон и возвращает часть себя'], ['home', 'Погода дома', 'свои на нервах — всем тяжелее'], ['wit', 'Юмор', 'каким юмором шутит в этом состоянии'], ['seq', 'Сцена и отклик', 'после сильного события: сначала реакция, потом развилка, потом решение']];
 const TAG_NAME = { drunk: 'спьяну — крупнее', trope: 'так у них заведено', blur: 'любовь размыла', glow: 'от своего теплее', deep: 'от своего — глубже и дольше', sour: 'накопилось — читает уколом', surprise: 'не ждал добра', haven: 'рядом свой — легче', pile: 'легло на то же чувство', forgive: 'больно, но ничего не меняет', grudge: 'осталась обида', cold: 'обида ещё держится' };
 const WIT_TEXT = { aff: 'если шутит — тепло и на двоих: смешит, чтобы стать ближе', self: 'если шутит — иронией над тем, что плохо: это способ держаться, а не веселье', aggr: 'если шутит — с зубами: сарказм, колкость, смешно и больно сразу', def: 'если шутит — над собой и раньше, чем это сделают другие' };
 // после сильного события ответ строится как «отклик» (Дуайт Суэйн: реакция → дилемма → решение), а сама реакция —
@@ -337,6 +337,13 @@ function nowStamp() {
     const ts = A.worldState()?.timestamp || {};
     return { ts: parseStamp(ts), mes: A.chatArr().length - 1, day: String(ts.story_date || '').trim() };
 }
+/** День истории, сдвинутый на n суток, строкой «ГГГГ-ММ-ДД» (или ''). */
+function dayShift(day, n) {
+    const d = day ? A.parseDate(day) : null;
+    if (!d || isNaN(d)) return '';
+    d.setDate(d.getDate() + n);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 /** «ММ-ДД» дня истории (или ''). */
 function mdOf(day) {
     const d = day ? A.parseDate(day) : null;
@@ -392,7 +399,9 @@ const dearOf = (who, s, E, t) => { const b = bondsOf(who, s, E, t)[0]; return b 
 function whoIs(name, self) {
     const n = str(name, 60);
     if (!n) return '';
-    const hit = [user(), ...mains()].find(x => x && A.sameName(x, n));
+    // участники чата — в первую очередь; дальше те, кого в группе нет, но мозг их знает: круг «своих» и пары с тропом
+    const known = [user(), ...mains(), ...circle(), ...pairs().flatMap(p => [p.a, p.b])];
+    const hit = known.find(x => x && A.sameName(x, n));
     return hit && !A.sameName(hit, self) ? A.canonName(hit) : '';
 }
 
@@ -503,6 +512,11 @@ function signals(who, t = temperOf(who), s = stateOf(who)) {
         add('date', `сегодня: ${dt.t}`, dt.kind === 'blow' ? { wor: -10, val: -6 } : { val: -10, aro: -6 });
         out.strainIn += 0.4;
         out.date = dt;
+    } else {
+        // канун: «завтра тот самый день» чувствуется заранее — слабее и без прироста напряжения
+        const eve = mdOf(dayShift(today, 1));
+        const de = eve ? t.dates.find(d => d.md === eve) : null;
+        if (de) { add('eve', `завтра: ${de.t}`, de.kind === 'blow' ? { wor: -4, val: -3 } : { val: -5, aro: -3 }); out.eve = de; }
     }
     // утро после плохой ночи
     if (s?.night?.bad && s.night.day === today) {
@@ -574,6 +588,12 @@ function view(who) {
     const hurt = s.hurtBy && lastI - num(s.hurtBy.mes) <= 8 ? s.hurtBy.kind : '';
     const sore = Object.entries(s.grudge || {}).filter(x => x[1] >= 30).sort((a, b) => b[1] - a[1])[0];
     const extra = { jeal: P.jealStyle(s, E, dom), role: sig.role || 0, hurt, stay: hurt === 'stay' ? stayStyle(E, dom) : '', cosmic: !!sig.dear?.t.cosmic, grudge: sore ? short(sore[0]) : '', stuck: mech('dom') && P.stuck(s, dom, nowStamp().ts), style: mech('style') ? styleId(t.attach) : '', dear: !!sig.dear, hung: !!sig.booze?.hung || num(sig.booze?.stage) >= 3 };
+    if (mech('style')) {
+        // проглотил несогласие со своим человеком — несколько ответов это видно; как именно — по способу привязываться
+        if (s.swallow && lastI - num(s.swallow.mes) <= 6) extra.mute = STYLE_OBJECT[extra.style] || 'mute';
+        if (s.dare && lastI - num(s.dare.mes) <= 4) extra.dare = true;
+    }
+    if (mech('status')) extra.status = statusFlip(statusHabit(t, mech('style') ? styleId(t.attach) : ''), dom, !!s.won && lastI - num(s.won) <= 2);
     return { who, t, s, sig, E, dom, wit: mech('wit') ? P.witOf(s, E, dom, t) : '', combo: combos({ s, dom, worry: sig.worry, apart: near.together === false, ...extra }) };
 }
 
@@ -587,7 +607,30 @@ const RULE = `
 psy — что этот пост (и пост игрока перед ним) сделал с ВНУТРЕННИМ состоянием персонажей из строки «Психика»: [{"who":"имя","blow":2,"held":1,"why":"из-за чего, 3–10 слов"}]. Только те, с кем что-то случилось; ни с кем — []. В строке — только ненулевые шкалы, каждая от 1 до 3 (1 — слегка, 2 — заметно, 3 — по-настоящему сильно; 3 ставь редко): warm — ему дали тепло, поддержку, нежность, признание; fun — смех, игра, флирт, азарт; win — справился, защитил, его послушали, получилось; calm — отдых, покой, безопасность, отпустило; threat — угроза ему или тем, кто ему дорог, опасность; blow — удар по самооценке: унизили, обесценили, пристыдили, напомнили о худшем в нём, сам себя винит; bound — потерял контроль: решили за него, скован, беспомощен, лишён выбора; wrong — с ним обошлись несправедливо, соврали, перешли границу, задели близкого; loss — утрата, разлука, отвергли, одиночество; rival — ревность: тот, кто ему дорог, отдал тепло или внимание другому, или кто-то претендует на его место рядом; held — сдержался: проглотил, промолчал, удержал лицо, хотя внутри кипело; open — открылся: сказал вслух то, что носил в себе, показал настоящее, выплакался, признался. Оценивай то, что случилось С НИМ, а не то, как он это показал: спокойное лицо после оскорбления — это blow и held. Обычный разговор без такого — не пиши ничего. Если это пришло от конкретного человека (в том числе от персонажа игрока) — добавь "by":"его имя" (у rival в by — тот, кто ему дорог); от двоих разное — две строки на одного who.
 Если в «Психике» у человека есть «возвращает» и в посте это с ним произошло и помогло — добавь в его строку "fix":[номера]. Если есть «убеждения» и поступок или слова в посте ПО-НАСТОЯЩЕМУ поколебали одно из них (−1 слегка, −2 сильно: ему на деле показали, что это не так, и он хоть на шаг это принял) или подтвердили (1, 2) — добавь "bel":[{"id":"b…","d":-1}]; дежурный комплимент убеждение не колеблет. Если человек в ЭТОМ посте пил спиртное — добавь в его строку "drink": 1 (глоток, бокал-другой), 2 (заметно: несколько порций) или 3 (много: бутылка, залпом, на спор); строка может состоять из одного "drink". То же — для персонажа игрока (его имя дано в «Психике»): если спиртное пил он, в этом или в предыдущем посте, добавь отдельную строку {"who":"его имя","drink":1}; других полей в ней не ставь.`;
 
-function chron() {
+/**
+ * Пост игрока целиком — Летописцу. Life показывает ему только начало предыдущего поста, и всё, что игрок написал
+ * дальше (выпил, сказал, сделал), терялось. Каждый пост игрока уходит один раз — тому ответу, который идёт следом
+ * (в группе двое отвечают подряд — второму его уже не даём, иначе выпитое посчиталось бы дважды); свайп того же
+ * ответа получает его снова.
+ */
+function playerPost(i) {
+    const ch = A.chatArr();
+    const at = Number.isInteger(i) ? i : ch.length - 1;
+    const m = M();
+    for (let j = at - 1; j >= 0 && j >= at - 6; j--) {
+        const x = ch[j];
+        if (!x || x.is_system) continue;
+        if (!x.is_user) continue;
+        if (m.meSeen && m.meSeen.u === j && m.meSeen.i !== at) return '';
+        m.meSeen = { u: j, i: at };
+        const text = String(safe(() => (A.plainText ? A.plainText(x.mes) : x.mes), x.mes) || '').replace(/\s+\n/g, '\n').trim();
+        const max = Math.round(P.clamp(cfg().postChars ?? 6000, 700, 20000));
+        return text.length > 700 ? text.slice(0, max) : '';
+    }
+    return '';
+}
+
+function chron(i) {
     if (!on()) return null;
     const who = list();
     if (!who.length) return null;
@@ -600,7 +643,8 @@ function chron() {
         if (bel.length) { bits.push(`убеждения: ${bel.map(b => `[${b.id}] «${b.t}»`).join(', ')}`); extra += 25; }
         return bits.join('; ');
     });
-    return { key: '"psy": []', rule: RULE, tokens: 85 + who.length * 50 + extra, input: `Психика (оцени, что с ними случилось в этих постах): ${cur.join(' | ')}${mech('booze') && user() ? ` | персонаж игрока: ${short(user())} (только выпитое)` : ''}` };
+    const full = safe(() => playerPost(i), '');
+    return { key: '"psy": []', rule: RULE, tokens: 85 + who.length * 50 + extra, input: `Психика (оцени, что с ними случилось в этих постах): ${cur.join(' | ')}${mech('booze') && user() ? ` | персонаж игрока: ${short(user())} (только выпитое)` : ''}${full ? `\nПост игрока целиком (выше он обрезан; учитывай его весь — во всех разделах):\n${full}` : ''}` };
 }
 
 function log(s, e) {
@@ -748,6 +792,7 @@ function afterPost(i, j, msg) {
                 // рядом свой человек — чужая угроза переносится легче
                 if (h.threat && hv && !(by && A.sameName(by, hv.to))) { L.kmul.threat = (L.kmul.threat ?? 1) * hv.threat; L.tags.push('haven'); }
             }
+            if ((h.win || 0) >= 2) s.won = i;
             if (sig.giddy > 1) for (const k of ['fun', 'win']) if (h[k]) L.kmul[k] = (L.kmul[k] ?? 1) * sig.giddy;
             // алкогольная близорукость: что на первом плане — разрастается (сильное и так на потолке)
             if (bz?.stage) {
@@ -774,6 +819,11 @@ function afterPost(i, j, msg) {
                 // от своего прилетело — тянуться мириться или закрыться; согрел — отпустило
                 if (bond && bond.t.L >= 0.5 && Object.keys(h).some(k => SOFT.includes(k) || k === 'loss')) s.hurtBy = { to: bond.to, mes: i, kind: afterHurt(bond.t, bond.st, mech('style') ? styleId(t.attach) : '') };
                 else if (s.hurtBy && A.sameName(s.hurtBy.to, by) && ((h.warm || 0) >= 2 || (h.open || 0) >= 2)) s.hurtBy = null;
+                // сдержался перед своим человеком — несогласие осталось при нём («преданность мешает возразить»)
+                if (bond && bond.t.L >= 0.5 && ((h.held || 0) >= 2 || ((h.held || 0) >= 1 && sig.worry))) s.swallow = { to: bond.to, mes: i };
+                else if (s.swallow && A.sameName(s.swallow.to, by) && (h.open || 0) >= 2) s.swallow = null;
+                // двое-зеркал: азарт своего человека заражает, а не настораживает
+                if (bond?.tr?.id === 'hybrid' && A.sameName(bond.to, by) && ((h.fun || 0) >= 2 || (h.win || 0) >= 2)) s.dare = { to: bond.to, mes: i };
                 // предательство того, кто не «свой», оставляет обиду; его же тепло и откровенность её снимают
                 if (L.tags.includes('grudge')) { s.grudge = s.grudge && typeof s.grudge === 'object' ? s.grudge : {}; s.grudge[by] = 100; }
                 else if (s.grudge?.[by] && ((h.warm || 0) >= 2 || (h.open || 0) >= 2)) { s.grudge[by] -= 45; if (s.grudge[by] < 8) delete s.grudge[by]; }
@@ -1008,12 +1058,16 @@ function note(who) {
     const leak = P.leakOf(s, sig.loose);
     if (leak) extra.push(`${leak === 2 ? 'то, что прячет, уже почти не держится и может сорваться с языка' : 'то, что прячет, проступает сильнее обычного'}: ${cassText(t, 'leak')}`);
     // комбинации потребностей с чувством: самая сильная — сразу, вторая — если останется место
-    const cmb = v.combo || [];
+    // качели статуса — не одна из комбинаций на выбор, а то, как сейчас держится тело: идёт всегда, когда поза сломалась
+    const flip = (v.combo || []).find(c => c.id === 'drop' || c.id === 'rise');
+    if (flip) bits.push(flip.t);
+    const cmb = (v.combo || []).filter(c => c !== flip);
     if (cmb[0]) extra.push(cmb[0].t);
     if (sig.worry && inScene(user()) && cmb[0]?.id !== 'control') extra.push(`тревога за близкого (${U}) выходит опекой: ${cassText(t, 'care')}`);
     if (s.recall && A.chatArr().length - 1 - s.recall.at <= 1) extra.push(`всплывает прежнее${s.recall.day ? ` (${s.recall.day})` : ''}: «${s.recall.t}» — не обязательно вслух, но оно здесь`);
     if (sig.night && num(s.night?.n) < 6) extra.push(`ночь была плохой — ${cassText(t, 'night')}`);
     if (sig.date) extra.push(`сегодня ${sig.date.t} — помнит этот день телом, вслух может и не сказать`);
+    else if (sig.eve) extra.push(`завтра ${sig.eve.t} — уже чувствует приближение: тише обычного, спать будет плохо; об этом не заговорит`);
     const bel = beliefBit(v);
     if (bel) extra.push(bel);
     if (sig.loose && !bz?.stage && sig.list.some(x => x.id === 'fx-alc')) extra.push('под алкоголем: тормоза слабее, скрываемое ближе к поверхности');
@@ -1326,6 +1380,8 @@ function hintsHtml(v, who) {
         feeder: fed ? { name: short(fed[0]), drive: low[0] } : null,
         booze: v.sig.booze ? { stage: v.sig.booze.stage, hung: v.sig.booze.hung, blank: v.sig.booze.blank } : null,
         spine: mech('spine') && hasSpine(v.t.spine) ? v.t.spine : null,
+        ease: mech('style') ? STYLE_EASE[styleId(v.t.attach)] || '' : '',
+        mute: v.combo.some(c => c.id === 'mute') ? STYLE_OBJECT[styleId(v.t.attach)] || 'mute' : '',
     });
     if (!h.help.length && !h.hurt.length && !h.expect.length) return '';
     const grp = (cls, ico, title, rows) => (rows.length ? `<div class="brn-hint ${cls}"><b>${ico} ${title}</b>${rows.map(r => `<span>${esc(r)}</span>`).join('')}</div>` : '');
@@ -1551,6 +1607,7 @@ function bodyHtml() {
             ${sw('brk', 'Срывы: когда накопилось и держать нечем')}
             ${sw('aura', 'Ауры в Сцене')}
             ${sw('auto', 'Сам собирать темперамент по карточке и лорбуку')}
+            <div class="brn-rng"><label>Сколько твоего поста видит Летописец<b data-out>${Math.round(P.clamp(c.postChars ?? 6000, 700, 20000))}</b></label><input type="range" min="700" max="20000" step="100" value="${Math.round(P.clamp(c.postChars ?? 6000, 700, 20000))}" data-bin="me" data-k="post"><small>Знаков. Сам Life показывает Летописцу только первые 700 — мозг досылает пост целиком, чтобы не терялось то, что ты написала в конце.</small></div>
             ${mech('booze') && user() ? `<div class="brn-rng"><label>Как алкоголь берёт ${esc(short(user()))}<b data-out>${meTol()}</b></label><input type="range" min="0.4" max="6" step="0.1" value="${meTol()}" data-bin="me" data-k="booze"><small>Твоего персонажа мозг не ведёт — только считает выпитое: стадию и похмелье. 0.6 — с бокала, 1 — как всех, 4 и выше — почти не берёт.</small></div>${meNow() ? '' : '<div class="lf-chips"><button class="lf-chip" data-bact="me-drink">налить</button></div>'}` : ''}
             <div class="lf-hint">Мозг ${VERSION}. Летописец после каждого ответа называет, что случилось с человеком; оси, волю, напряжение и несказанное считает код, время — по Horae. Модель получает кассету — без цифр.${A.senses ? '' : ' Life старой версии: раны, недосып и Камни мозг пока не видит — обнови Life.'}</div>
         </details>`;
@@ -1604,7 +1661,7 @@ function applyOp(s, t, op) {
         if (s.night) s.night.bad = false;
         log(s, { mes, src: 'hand', why: 'отдых: воля +40, напряжение −30' });
     }
-    if (op.act === 'reset') Object.assign(s, P.fresh(t), { at: nowStamp(), night: null, why: null, belBroke: null, recall: null, hurtBy: null, heldDay: null, jealTo: '', feed: {}, drf: {}, grudge: {}, seq: null, filled: false, bac: 0, bacPeak: 0, hung: null, blank: false, drankAt: null, dr: freshDrives() });
+    if (op.act === 'reset') Object.assign(s, P.fresh(t), { at: nowStamp(), night: null, why: null, belBroke: null, recall: null, hurtBy: null, heldDay: null, jealTo: '', feed: {}, drf: {}, grudge: {}, seq: null, filled: false, bac: 0, bacPeak: 0, hung: null, blank: false, drankAt: null, swallow: null, dare: null, won: null, dr: freshDrives() });
     if (op.act === 'drink') { drink(s, 2, tolOf(t)); log(s, { mes, src: 'drink', why: `налито руками — ${STAGE_NAME[stageOf(s.bac)]}` }); }
     if (op.act === 'sober') { s.bac = 0; s.bacPeak = 0; s.hung = null; s.blank = false; log(s, { mes, src: 'hand', why: 'хмель снят руками' }); }
     if (op.act === 'feed' && P.DRIVES.includes(op.k)) { healDrives(s); s.dr[op.k] = P.clamp(s.dr[op.k] + num(op.d), 0, 100); }
@@ -1693,6 +1750,7 @@ function onChange(ev) {
     const k = el.dataset.k || '';
     try {
         if (kind === 'g') { cfg()[k] = !!el.checked; saveCfg(); }
+        if (kind === 'me' && k === 'post') { cfg().postChars = Math.round(P.clamp(el.value, 700, 20000)); saveCfg(); }
         if (kind === 'me' && k === 'booze') { cfg().meBooze = P.clamp(el.value, 0.4, 6); saveCfg(); safe(() => A.updatePrompt()); }
         if (kind === 'm' && MECH.some(x => x[0] === k)) { cfg().mech[k] = !!el.checked; saveCfg(); }
         if (kind === 'on') editTemper(who, (t) => { t.on = !!el.checked; });
@@ -1767,7 +1825,7 @@ function boot(tries = 0) {
         id: ID,
         init: (api) => { A = api; },
         prompt: (type) => safe(() => prompt(type), ''),
-        chron: () => safe(() => chron(), null),
+        chron: (i) => safe(() => chron(i), null),
         afterPost: (i, j, msg) => { try { afterPost(i, j, msg); } catch (e) { console.warn('[Мозг] после поста', e); } },
         sceneHtml: () => safe(() => sceneHtml(), ''),
     });

@@ -1290,3 +1290,128 @@ test('0.8.3: круг заполнился сам, а ядро назвало п
     st.md.brain.circle = []; st.md.brain.circleAuto = false; st.pins = {}; st.md.brain.pairs = [];
     await eraWait();
 });
+
+// ───────────── 0.9 ─────────────
+
+const userPost = (text) => { chat.push({ name: 'Хеди Барлоу', is_user: true, is_system: false, mes: text, horae_meta: { timestamp: { ...world.timestamp } } }); return chat.length - 1; };
+
+test('0.9: Летописцу — пост игрока целиком, и только один раз', async () => {
+    await fresh(9800);
+    userPost(`${'Она долго молчала. '.repeat(60)}А потом допила бутылку до дна.`);
+    const i = post(B);
+    const a = mod.chron(i).input;
+    assert.match(a, /Пост игрока целиком \(выше он обрезан[\s\S]*допила бутылку до дна/);
+    // в группе второй отвечает на тот же пост — ему его уже не даём
+    const k = post(N);
+    assert.ok(!/Пост игрока целиком/.test(mod.chron(k).input));
+    // свайп первого ответа — снова получает
+    chat.pop();
+    assert.match(mod.chron(i).input, /допила бутылку до дна/);
+    // короткий пост Life и так показывает целиком
+    userPost('Короткий пост.');
+    assert.ok(!/Пост игрока целиком/.test(mod.chron(post(B)).input));
+    // сколько знаков — ползунок
+    change({ bin: 'me', k: 'post' }, '800');
+    userPost(`${'Она долго молчала. '.repeat(60)}А потом допила бутылку до дна.`);
+    const cut = mod.chron(post(B)).input;
+    assert.match(cut, /Пост игрока целиком/);
+    assert.ok(!/допила бутылку/.test(cut));
+    change({ bin: 'me', k: 'post' }, '6000');
+    assert.match(st.shelf.tracker.html(), /Сколько твоего поста видит Летописец/);
+});
+
+test('0.9: событие от «своего», которого нет в группе, тоже идёт через линзу и троп', async () => {
+    st.md.brain.circle = ['Хеди', 'Баки', 'Елена'];
+    st.md.brain.pairs = [{ a: 'Баки', b: 'Елена', id: 'sisters', rom: 'no' }];
+    await fresh(9900);
+    next([{ who: 'Баки', by: 'Елена', blow: 1, why: 'подколола по телефону насчёт причёски' }]);
+    assert.ok(lastLog().tags.includes('trope'), JSON.stringify(lastLog().tags));
+    assert.ok(lastLog().tags.includes('blur'));
+    await fresh(9910);
+    next([{ who: 'Баки', by: 'Сосед Снизу', blow: 1, why: 'нахамил на лестнице' }]);
+    assert.ok(!(lastLog().tags || []).some(x => x === 'trope' || x === 'blur'));
+    st.md.brain.circle = [];
+    st.md.brain.pairs = [];
+});
+
+test('0.9: преданность мешает возразить — у каждого по-своему; откровенный разговор снимает', async () => {
+    st.md.brain.circle = ['Хеди', 'Баки'];
+    st.md.brain.pairs = [];
+    setStyle('guard');
+    await fresh(10000);
+    next([{ who: 'Баки', by: 'Хеди', held: 2, why: 'она решила идти одна — промолчал' }]);
+    assert.ok(brain.view(B).combo.includes('mute'));
+    assert.match(mod.prompt('normal'), /возражение застревает в горле, вместо него — помощь в том, что считает ошибкой/);
+    const html = st.shelf.tracker.html();
+    assert.match(html, /молчит из преданности: спроси прямо/);
+    assert.match(html, /с ним работает: не требовать слов о чувствах/);
+    setStyle('fix');
+    assert.match(mod.prompt('normal'), /обходной план: вслух — кивок/);
+    setStyle('test');
+    assert.match(mod.prompt('normal'), /колкостью не по делу/);
+    setStyle('armor');
+    assert.match(mod.prompt('normal'), /холодную вежливость/);
+    next([{ who: 'Баки', by: 'Хеди', open: 2, why: 'спросила прямо, что не так, и выслушала' }]);
+    assert.ok(!brain.view(B).combo.includes('mute'));
+    // чужому «сдержался» ничего такого не значит
+    await fresh(10100);
+    next([{ who: 'Баки', by: 'Сосед Снизу', held: 2, why: 'не стал связываться' }]);
+    assert.ok(!brain.view(B).combo.includes('mute'));
+    setStyle('');
+    st.md.brain.circle = [];
+});
+
+test('0.9: двое-зеркал — азарт своего человека заражает; у других пар — нет', async () => {
+    delete st.md.brain.circle;
+    delete st.md.brain.pairs;
+    st.pins = {};
+    await fresh(10200);
+    next([{ who: 'Баки', by: 'Хеди', fun: 2, why: 'подбила прыгнуть с пирса первым' }]);
+    assert.ok(brain.view(B).combo.includes('dare'));
+    assert.match(mod.prompt('normal'), /заводится следом за своим человеком: не останавливает, а поднимает ставку/);
+    change({ bin: 'tr', who: B, to: 'Хеди Барлоу' }, 'kin', { tagName: 'SELECT' });
+    await fresh(10300);
+    next([{ who: 'Баки', by: 'Хеди', fun: 2, why: 'подбила прыгнуть с пирса первым' }]);
+    assert.ok(!brain.view(B).combo.includes('dare'));
+    st.md.brain.circle = [];
+    st.md.brain.pairs = [];
+});
+
+test('0.9: качели статуса — уверенного придавило, тихого вынесло наверх; выключается', async () => {
+    const prof = () => st.ext.brain.prof[B];
+    const was = { ...prof().base };
+    setStyle('fix');
+    Object.assign(prof().base, { ctl: 10, wor: 0 });
+    await fresh(10400);
+    assert.ok(!brain.view(B).combo.includes('drop'));
+    next([{ who: 'Баки', blow: 3, why: 'унизили при всех, и ответить было нечем' }]);
+    assert.equal(brain.view(B).emo.id, 'shame');
+    assert.ok(brain.view(B).combo.includes('drop'));
+    assert.match(mod.prompt('normal'), /привычная уверенность слетела/);
+    mechSet('status', false);
+    assert.ok(!brain.view(B).combo.includes('drop'));
+    mechSet('status', true);
+    setStyle('serve');
+    Object.assign(prof().base, { ctl: -6, wor: -4 });
+    await fresh(10500);
+    next([{ who: 'Баки', win: 2, why: 'сделал то, чего от него никто не ждал' }]);
+    assert.ok(brain.view(B).combo.includes('rise'));
+    assert.match(mod.prompt('normal'), /непривычно выпрямляется/);
+    Object.assign(prof().base, was);
+    setStyle('');
+});
+
+test('0.9: канун дня, который помнит телом, — слабее самого дня', async () => {
+    await fresh(10600);
+    const d = new Date(world.timestamp.story_date);
+    d.setDate(d.getDate() + 1);
+    const line = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')} — день, когда упал с поезда`;
+    change({ bin: 'd', k: 'dates', who: B }, line, { tagName: 'TEXTAREA' });
+    const eve = mod.prompt('normal');
+    assert.match(eve, /завтра день, когда упал с поезда — уже чувствует приближение/);
+    const evE = brain.view(B).E.val;
+    hour(10624);
+    assert.match(mod.prompt('normal'), /сегодня день, когда упал с поезда — помнит этот день телом/);
+    assert.ok(brain.view(B).E.val < evE, 'в сам день тяжелее, чем накануне');
+    change({ bin: 'd', k: 'dates', who: B }, '', { tagName: 'TEXTAREA' });
+});
