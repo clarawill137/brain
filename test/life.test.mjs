@@ -7,7 +7,7 @@ const world = { timestamp: { story_date: '2024-12-01', story_time: '10:00' }, sc
 const chat = [];
 const post = (name, user = false) => { chat.push({ name, is_user: user, is_system: false, mes: '…', horae_meta: { timestamp: { ...world.timestamp } } }); return chat.length - 1; };
 const handlers = {};
-const st = { ext: { brain: { auto: false } }, md: { brain: { circle: [] } }, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [], faces: [], rel: {}, story: null, fill: [], pins: {} };
+const st = { depth: null, ext: { brain: { auto: false } }, md: { brain: { circle: [] } }, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [], faces: [], rel: {}, story: null, fill: [], pins: {} };
 
 const api = {
     ctx: () => ({ name1: 'Хеди Барлоу', extensionSettings: st.ext, chatMetadata: st.md, saveSettingsDebounced() {}, saveMetadataDebounced() {}, eventSource: { on() {} }, eventTypes: { CHAT_CHANGED: 'chat' } }),
@@ -32,7 +32,7 @@ const api = {
     cardOf: () => ({ description: 'Бывший Зимний солдат. Сдержан, говорит коротко.' }),
     askJson: async () => {
         st.asked++;
-        return { note: 'Держится ровно, вину носит молча.', base: { val: -5, aro: 5, ctl: 28, wor: -18 }, react: 0.9, recover: 0.7, grit: 1.5, sens: { blow: 1.4, bound: 1.5, threat: 0.7, warm: 0.8, wrong: 1, loss: 1.2 },
+        return { ...(st.depth || {}), note: 'Держится ровно, вину носит молча.', base: { val: -5, aro: 5, ctl: 28, wor: -18 }, react: 0.9, recover: 0.7, grit: 1.5, sens: { blow: 1.4, bound: 1.5, threat: 0.7, warm: 0.8, wrong: 1, loss: 1.2 },
             cass: { shame: ['отводит глаза и трёт запястье живой руки', 'замолкает и уходит чинить что-нибудь руками', 'отказывается от её рук: «не надо, я грязный»', 'лицо пустеет, отвечает рапортом'], brk: 'лицо пустеет, тело собирается, речь сжимается до односложных рапортов' } };
     },
     senses: {
@@ -389,7 +389,7 @@ test('0.2: химия — под алкоголем скрываемое бли�
     st.hurt = {};
     st.fx['баки'] = [{ what: 'выпил полбутылки виски', left: 1e6 }];
     live().mask = 60; live().will = 30;
-    assert.match(mod.prompt('normal'), /под алкоголем/);
+    assert.match(mod.prompt('normal'), /навеселе/, 'о спиртном знает только Life — хотя бы «навеселе»');
     assert.ok(brain.view(B).leak >= 1);
     st.fx = {};
 });
@@ -879,4 +879,239 @@ test('0.7: тёмная сторона — за своего на что уго�
     assert.match(st.shelf.tracker.html(), /опаснее всего для самого себя/);
     st.stones = null;
     st.md.brain.circle = [];
+});
+
+// ───────────── 0.8: как привязывается, тропы пар, стержень, алкоголь ─────────────
+
+const setStyle = (id, who = B) => change({ bin: 'ts', k: 'attach', who }, id, { tagName: 'SELECT' });
+const mechSet = (k, v) => change({ bin: 'm', k }, '', { checked: v });
+/** Три ответа подряд в тихой сцене: что за них ушло модели. */
+const three = () => { const out = []; for (let k = 0; k < 3; k++) { out.push(mod.prompt('normal')); next(); } return out; };
+const count = (rows, re) => rows.filter(x => re.test(x)).length;
+
+test('0.8: Летописцу — «пил»', () => {
+    assert.match(mod.chron().rule, /в ЭТОМ посте пил спиртное[\s\S]*"drink": 1 \(глоток, бокал-другой\)/);
+});
+
+test('0.8: алкоголь — пьянеет по стадиям, играет под градусом, наутро похмелье', async () => {
+    await fresh(8000);
+    assert.equal(brain.view(B).drunk, 0);
+    next([{ who: 'Баки', drink: 2 }]);
+    assert.equal(brain.view(B).drunk, 1);
+    assert.match(mod.prompt('normal'), /навеселе: говорит свободнее/);
+    next([{ who: 'Баки', drink: 3, fun: 1, why: 'пьют с ней на кухне' }]);
+    assert.equal(brain.view(B).drunk, 3);
+    assert.match(lastLog('drink').why, /спиртное: много — сильное опьянение/);
+    assert.match(mod.prompt('normal'), /сильное опьянение: язык заплетается/);
+    assert.match(st.shelf.tracker.html(), /🥃 Сильное опьянение/);
+    assert.match(st.shelf.tracker.html(), /завтра не вспомнит/);
+    // утро: алкоголь ушёл — пришло похмелье
+    hour(8010);
+    const v = brain.view(B);
+    assert.equal(v.drunk, 0);
+    assert.equal(v.hung, 2);
+    const p = mod.prompt('normal');
+    assert.match(p, /тяжёлое похмелье: мутит/);
+    assert.match(p, /помнит кусками/);
+    next();
+    assert.match(lastLog('drink').why, /тяжёлое похмелье/);
+    const html = st.shelf.tracker.html();
+    assert.match(html, /🤕 Тяжёлое похмелье/);
+    assert.match(html, /с похмелья: тише, вода/);
+    assert.match(html, /может спросить, что говорил и делал/);
+    hour(8040);
+    assert.equal(brain.view(B).hung, 0, 'к следующему дню прошло');
+    assert.equal(mod.prompt('normal'), '');
+});
+
+test('0.8: близорукость — под градусом то же событие крупнее; сильное — на том же потолке', async () => {
+    await fresh(8100);
+    next([{ who: 'Баки', warm: 2, why: 'обняла' }]);
+    const dry = lastLog().d.val;
+    await fresh(8200);
+    next([{ who: 'Баки', drink: 3 }]);
+    next([{ who: 'Баки', warm: 2, why: 'обняла' }]);
+    assert.ok(lastLog().d.val > dry, `${lastLog().d.val} > ${dry}`);
+    assert.ok(lastLog().tags.includes('drunk'));
+    assert.match(st.shelf.tracker.html(), /спьяну — крупнее/);
+    await fresh(8300);
+    next([{ who: 'Баки', blow: 3, why: 'унизили при всех' }]);
+    const hard = lastLog().d.wor;
+    await fresh(8400);
+    next([{ who: 'Баки', drink: 3 }]);
+    next([{ who: 'Баки', blow: 3, why: 'унизили при всех' }]);
+    assert.equal(lastLog().d.wor, hard, 'поручень: сильное событие алкоголь не раздувает');
+});
+
+test('0.8: суперсолдата почти не берёт; руками — налить и протрезвить', async () => {
+    change({ bin: 't', k: 'booze', who: B }, '4');
+    await fresh(8500);
+    next([{ who: 'Баки', drink: 3 }]);
+    assert.equal(brain.view(B).drunk, 0);
+    assert.match(lastLog('drink').why, /почти не берёт/);
+    change({ bin: 't', k: 'booze', who: B }, '1');
+    await fresh(8550);
+    await click({ bact: 'drink', who: B });
+    assert.equal(brain.view(B).drunk, 1);
+    assert.match(st.shelf.tracker.html(), /протрезвить/);
+    await click({ bact: 'sober', who: B });
+    assert.equal(brain.view(B).drunk, 0);
+});
+
+test('0.8: алкоголь выключен — как раньше: о спиртном знает только Life', async () => {
+    mechSet('booze', false);
+    await fresh(8600);
+    st.fx['баки'] = [{ what: 'выпил полбутылки виски', left: 1e6 }];
+    live().mask = 60; live().will = 30;
+    assert.match(mod.prompt('normal'), /под алкоголем/);
+    next([{ who: 'Баки', drink: 3 }]);
+    assert.equal(brain.view(B).drunk, 0);
+    st.fx = {};
+    mechSet('booze', true);
+});
+
+test('0.8: как привязывается — у каждого свои слова после удара, в ревности и в тихой сцене', async () => {
+    st.md.brain.circle = ['Хеди', 'Баки'];
+    st.md.brain.pairs = [];
+    setStyle('guard');
+    await fresh(8700);
+    assert.match(st.shelf.tracker.html(), /Привязывается: сторож/);
+    assert.equal(brain.view(B).attach, 'guard');
+    next([{ who: 'Баки', by: 'Хеди', blow: 3, why: 'она сказала, что он ей в тягость' }]);
+    assert.equal(live().hurtBy.kind, 'stay');
+    assert.match(mod.prompt('normal'), /принимает как заслуженный и остаётся на посту/);
+    setStyle('test');
+    await fresh(8800);
+    next([{ who: 'Баки', by: 'Хеди', blow: 3, why: 'она сказала, что он ей в тягость' }]);
+    assert.match(mod.prompt('normal'), /огрызается и смотрит, уйдут ли теперь/);
+    await fresh(8900);
+    next([{ who: 'Баки', by: 'Хеди', rival: 3, why: 'она весь вечер смеётся с другим' }]);
+    next([{ who: 'Баки', by: 'Хеди', rival: 3, why: 'и уходит с ним танцевать' }]);
+    assert.ok(brain.view(B).combo.includes('jealous'));
+    assert.match(mod.prompt('normal'), /ревнует вслух и с издёвкой/);
+    // цифры пары у каждого способа свои
+    await fresh(9000);
+    setStyle('fuse');
+    const fuse = brain.view(B).dear;
+    setStyle('armor');
+    const armor = brain.view(B).dear;
+    assert.ok(fuse.fuse > armor.fuse && fuse.haven > armor.haven, JSON.stringify([fuse, armor]));
+    // тихая сцена: его манера быть рядом — раз в три ответа, не чаще
+    setStyle('guard');
+    await fresh(9100);
+    const rows = three();
+    assert.equal(count(rows, /привязанность выражает охраной и делом/), 1, rows.join('\n'));
+    assert.equal(count(rows, /Баки — постоянное, не событие \(держи в поведении/), 1, 'в остальные два ответа модели ничего не уходит');
+    assert.equal(count(rows, /что внутри сейчас/), 0);
+    mechSet('style', false);
+    assert.equal(count(three(), /охраной и делом/), 0);
+    assert.equal(brain.view(B).attach, '');
+    mechSet('style', true);
+    setStyle('');
+    st.md.brain.circle = [];
+});
+
+test('0.8: троп пары — сеется с кругом, виден в листе, под давлением показывает тёмную сторону', async () => {
+    delete st.md.brain.circle;
+    delete st.md.brain.pairs;
+    st.pins = {};
+    await fresh(9200);
+    const html = st.shelf.tracker.html();
+    assert.match(html, /<option value="hybrid" selected>Доктор и Клара<\/option>/);
+    assert.match(html, /<option value="yes" selected>романтика<\/option>/);
+    assert.match(html, /Под давлением: вдвоём безрассуднее/);
+    assert.equal(st.md.brain.pairs.length, 9);
+    assert.equal(brain.view(B).dear.trope, 'hybrid');
+    const rows = three();
+    assert.equal(count(rows, /с Хеди — равные, которые отражают друг друга[\s\S]*это любовь, и оба это знают/), 1, rows.join('\n'));
+    assert.equal(count(rows, /под давлением/), 0);
+    // у этих двоих своё задевает сильнее
+    next([{ who: 'Баки', by: 'Хеди', fun: 2, why: 'подбила на глупость' }]);
+    assert.ok(lastLog().tags.includes('trope'));
+    next([{ who: 'Баки', threat: 3, why: 'засада на трассе' }]);
+    assert.match(mod.prompt('normal'), /что внутри сейчас[\s\S]*с Хеди — равные[\s\S]*под давлением вылезает другое: вдвоём безрассуднее/);
+    // правится в листе
+    change({ bin: 'tr', who: B, to: 'Хеди Барлоу' }, 'kin', { tagName: 'SELECT' });
+    change({ bin: 'rom', who: B, to: 'Хеди Барлоу' }, 'hint', { tagName: 'SELECT' });
+    assert.deepEqual(st.md.brain.pairs.find(x => x.a === 'Хеди' && x.b === 'Баки'), { a: 'Хеди', b: 'Баки', id: 'kin', rom: 'hint' });
+    assert.match(mod.prompt('normal'), /с Хеди — родные, которые навёрстывают[\s\S]*вслух этого нет/);
+    change({ bin: 'tr', who: B, to: 'Хеди Барлоу' }, '', { tagName: 'SELECT' });
+    assert.equal(st.md.brain.pairs.length, 8);
+    assert.ok(!/с Хеди —/.test(mod.prompt('normal')));
+    st.md.brain.circle = [];
+    st.md.brain.pairs = [];
+});
+
+test('0.8: стержень — в тихой сцене чем живёт, на развилке «хочу» против «нужно»', async () => {
+    const sp = (k, v) => change({ bin: 'sp', k, who: B }, v, { tagName: 'TEXTAREA' });
+    sp('goal', 'искупить всё, что сделал Солдат');
+    sp('need', 'поверить, что любить можно и такого');
+    sp('view', 'за всё платят');
+    sp('fear', 'снова стать оружием');
+    await fresh(9300);
+    const rows = three();
+    assert.equal(count(rows, /чем живёт: искупить всё, что сделал Солдат/), 1, rows.join('\n'));
+    assert.equal(count(rows, /нужно другое/), 0);
+    const html = st.shelf.tracker.html();
+    assert.match(html, /Стержень[\s\S]*Добивается[\s\S]*На деле нужно[\s\S]*поверить, что любить можно и такого/);
+    assert.match(html, /главный страх: снова стать оружием/);
+    assert.deepEqual(brain.view(B).spine.goal, 'искупить всё, что сделал Солдат');
+    // сильное плохое: реакция → развилка (его ответ прошёл) — тут и видно, из чего он выбирает
+    next([{ who: 'Баки', bound: 2, why: 'его отстранили от дела' }], N);
+    assert.ok(!/решает из своего/.test(mod.prompt('normal')));
+    await fresh(9400);
+    next([{ who: 'Баки', wrong: 3, why: 'его подставили свои же' }], N);
+    next();
+    const p = mod.prompt('normal');
+    assert.match(p, /развилка/);
+    assert.match(p, /решает из своего «хочу»: искупить[\s\S]*на деле нужно другое: поверить[\s\S]*пока не видит[\s\S]*больше всего боится: снова стать оружием/);
+    assert.ok(!/читает через своё/.test(p), 'мировоззрение — когда прижало, а не на развилке');
+    mechSet('spine', false);
+    assert.ok(!/решает из своего/.test(mod.prompt('normal')));
+    assert.equal(brain.view(B).spine, null);
+    mechSet('spine', true);
+    for (const k of ['goal', 'need', 'view', 'fear']) sp(k, '');
+});
+
+test('0.8: известным — способ по умолчанию; сбор приносит стержень; у собранных раньше дособирается только новое', async () => {
+    const prof = () => st.ext.brain.prof[B];
+    Object.assign(prof(), { attach: '', reject: 1, booze: 1, seeded: undefined, v: 0 });
+    Object.assign(st.ext.brain.prof[N] || (st.ext.brain.prof[N] = {}), { attach: '', seeded: undefined });
+    await brain.ensure();
+    assert.equal(prof().attach, 'guard');
+    assert.equal(prof().reject, 1.4);
+    assert.equal(prof().booze, 2.5, 'суперсолдат: берёт хуже и отпускает быстрее, но берёт');
+    assert.equal(st.ext.brain.prof[N].attach, 'armor');
+    setStyle('fix');
+    await brain.ensure();
+    assert.equal(prof().attach, 'fix', 'поправленное руками по умолчанию не затирается');
+    // полный сбор
+    st.depth = { attach: 'сторож', reject: 1.7, booze: 2, spine: { goal: 'искупить', need: 'поверить, что его можно любить', view: 'за всё платят', fear: 'снова стать оружием', face: 'надёжным' }, drunk: 'почти не пьянеет: только взгляд теплеет и плечи опускаются' };
+    Object.assign(prof(), { attach: '', seeded: undefined, v: 0, spine: {} });
+    await click({ bact: 'collect', who: B });
+    assert.equal(prof().attach, 'guard', 'название способа читается');
+    assert.equal(prof().reject, 1.7);
+    assert.equal(prof().spine.need, 'поверить, что его можно любить');
+    assert.match(prof().cass.drunk, /почти не пьянеет/);
+    assert.equal(prof().v, 8);
+    assert.match(st.fill.length ? st.fill[st.fill.length - 1].messages[0].content : mod.chron().rule, /./);
+    // собран до 0.8 и поправлен руками: дособрать только новое
+    const shame = JSON.stringify(prof().cass.shame);
+    Object.assign(prof(), { attach: '', v: 0, spine: {}, src: 'hand', react: 1.3 });
+    delete prof().cass.drunk;
+    st.ext.brain.auto = true;
+    st.ext.brain.tried = {};
+    await brain.ensure();
+    assert.equal(prof().attach, 'guard');
+    assert.equal(prof().spine.goal, 'искупить');
+    assert.match(prof().cass.drunk, /почти не пьянеет/);
+    assert.equal(prof().src, 'hand');
+    assert.equal(prof().react, 1.3, 'остальное не тронуто');
+    assert.equal(JSON.stringify(prof().cass.shame), shame);
+    assert.equal(prof().v, 8);
+    const asked = st.asked;
+    await brain.ensure();
+    assert.equal(st.asked, asked, 'второй раз не спрашивает');
+    st.ext.brain.auto = false;
+    st.depth = null;
 });

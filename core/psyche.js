@@ -109,6 +109,13 @@ export function normTemper(t) {
         return { md: `${String(+md[1]).padStart(2, '0')}-${String(+md[2]).padStart(2, '0')}`, t, kind: d.kind === 'blow' ? 'blow' : 'loss' };
     }).filter(Boolean).slice(0, 6);
     out.note = typeof x.note === 'string' ? x.note.slice(0, 400) : '';
+    // как привязывается (core/attach.js), рана отвержения, как берёт алкоголь (core/booze.js), стержень
+    out.attach = typeof x.attach === 'string' ? x.attach.trim().slice(0, 16) : '';
+    out.reject = r1(clamp(x.reject ?? 1, 0.5, 2));
+    out.booze = r1(clamp(x.booze ?? 1, 0.4, 6));
+    out.spine = {};
+    for (const k of ['goal', 'need', 'view', 'fear', 'face']) out.spine[k] = typeof x.spine?.[k] === 'string' ? x.spine[k].replace(/\s+/g, ' ').trim().slice(0, 180) : '';
+    out.v = Math.round(clamp(x.v ?? 0, 0, 99));
     out.src = ['auto', 'lore', 'hand'].includes(x.src) ? x.src : 'auto';
     return out;
 }
@@ -148,6 +155,9 @@ export function heal(s, temper) {
     if (!Array.isArray(s.log)) s.log = [];
     if (s.brk && typeof s.brk !== 'object') s.brk = null;
     if (s.hang && typeof s.hang !== 'object') s.hang = null;
+    s.bac = clamp(s.bac ?? 0, 0, 100);
+    s.bacPeak = clamp(s.bacPeak ?? 0, 0, 100);
+    if (s.hung && typeof s.hung !== 'object') s.hung = null;
     return s;
 }
 

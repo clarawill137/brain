@@ -16,6 +16,7 @@
 // оставляет обиду.
 
 import { clamp } from './psyche.js';
+import { STYLE_MOD, STYLE_HURT } from './attach.js';
 
 const num = (v, d = 0) => (Number.isFinite(+v) ? +v : d);
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -55,26 +56,34 @@ export function tie(rel, opts = {}) {
  *   haven — «гавань»: насколько рядом с ним отпускает;
  *   fuse  — «ревность наготове»: насколько его возьмёт появление соперника;
  *   dread — «страх потерять».
- * v: { E — оси сейчас, dr — потребности, bel — носит ли убеждение, что его не за что любить (0…1) }.
+ * v: { E — оси сейчас, dr — потребности, bel — носит ли убеждение, что его не за что любить (0…1),
+ *      style — способ привязываться (core/attach.js), reject — рана отвержения (0.5…2) }.
  */
 export function pairStats(t, v = {}) {
     if (!t) return { blur: 0, haven: 0, fuse: 0, dread: 0 };
     const wor = num(v.E?.wor), bond = num(v.dr?.bond, 60);
     // неуверенность в себе и в своём месте рядом: низкая самооценка, голод по близости, убеждение «меня не за что»
-    const insecure = clamp(clamp((-wor - 10) / 60, 0, 1) * 0.55 + clamp((45 - bond) / 45, 0, 1) * 0.25 + clamp(num(v.bel), 0, 1) * 0.3, 0, 1);
+    const now = clamp(clamp((-wor - 10) / 60, 0, 1) * 0.55 + clamp((45 - bond) / 45, 0, 1) * 0.25 + clamp(num(v.bel), 0, 1) * 0.3, 0, 1);
+    // рана отвержения (Downey, Feldman): кто заранее ждёт, что бросят, не уверен в своём месте и в хороший день
+    const rj = clamp(num(v.reject, 1), 0.5, 2);
+    const insecure = clamp(now * (0.6 + 0.4 * rj) + 0.25 * (rj - 1), 0, 1);
     const calm = 1 - t.sour;
+    // способ привязываться красит цифры: у каждого свои
+    const M = STYLE_MOD[v.style] || {};
+    const m = (k, x) => pct(x * num(M[k], 1));
     return {
-        blur: pct(t.L * (0.5 + 0.5 * t.trust) * calm),
-        haven: pct(t.L * (0.4 + 0.6 * t.trust) * calm),
-        fuse: pct(t.L * (0.3 + 0.7 * insecure) + 0.4 * t.jeal * t.L),
-        dread: pct(t.L * (0.15 + 0.85 * insecure)),
+        blur: m('blur', t.L * (0.5 + 0.5 * t.trust) * calm),
+        haven: m('haven', t.L * (0.4 + 0.6 * t.trust) * calm),
+        fuse: m('fuse', t.L * (0.3 + 0.7 * insecure) + 0.4 * t.jeal * t.L),
+        dread: m('dread', t.L * (0.15 + 0.85 * insecure)),
         insecure: r2(insecure),
     };
 }
 
 /**
  * Линза: чем событие становится, если оно пришло от этого человека.
- * hits — { вид: сила }, t — tie(), st — pairStats(), opts.grudge — держит ли он на этого человека обиду (0…100).
+ * hits — { вид: сила }, t — tie(), st — pairStats(), opts.grudge — держит ли он на этого человека обиду (0…100),
+ * opts.reject — рана отвержения (0.5…2).
  * → { kmul: { вид: множитель }, kmood: { вид: доля оседания в настроении }, tags: [] }
  * Ещё метки: forgive — сильный удар от «своего» по космической привязанности: больно в полную силу, но обидой
  * не осядет; grudge — сильный удар от того, кому доверял, но не «своего»: останется обида; cold — обида ещё держится.
@@ -100,7 +109,8 @@ export function lens(hits, t, st, opts = {}) {
         } else if (k === 'loss') {
             // уход своего человека: заметный — бьёт сильнее, сильный — не выше (он и так на потолке одного события),
             // но в обоих случаях оседает глубже и держится дольше
-            if (L > 0) { if (n <= 2) out.kmul[k] = r2(1 + 0.2 * L); out.kmood[k] = r2(1 + (n >= 3 ? 0.25 : 0.3) * L); }
+            // с раной отвержения некрупный уход читается громче: «ну вот, началось»
+            if (L > 0) { if (n <= 2) out.kmul[k] = r2(1 + 0.2 * L * (0.5 + 0.5 * clamp(num(opts.reject, 1), 0.5, 2))); out.kmood[k] = r2(1 + (n >= 3 ? 0.25 : 0.3) * L); }
             if (L >= 0.5) tag('deep');
         } else if (SOFT.includes(k)) {
             // сильное от своего любовь не размывает — и не усиливает: оно и так на потолке одного события.
@@ -139,10 +149,12 @@ export function haven(st, worry = false) {
  * уверен, что его ценят, — идёт мириться первым; не уверен — отступает первым, чтобы не отвергли.
  * → 'mend' | 'guard' | ''
  */
-export function afterHurt(t, st) {
+export function afterHurt(t, st, style = '') {
     if (!t || t.L < 0.5) return '';
     // космическая привязанность: что бы ни случилось, остаётся рядом — как именно, решит его характер (stayStyle)
     if (t.cosmic) return 'stay';
+    // у способа привязываться свой ответ: кто залипает и чинит — тянется; кто в броне и проверяет — закрывается
+    if (STYLE_HURT[style]) return STYLE_HURT[style];
     return num(st?.insecure) >= 0.5 ? 'guard' : 'mend';
 }
 
