@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as P from '../core/psyche.js';
-import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, tropeLine, tropeMul, ownSide, rejectOf, normSpine, hasSpine, spineLine } from '../core/attach.js';
+import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, tropeLine, tropeMul, ownSide, sideOf, tropeText, pairLine, wedNorm, wedSpan, wedDay, wedLine, rejectOf, normSpine, hasSpine, spineLine } from '../core/attach.js';
 import { tie, pairStats, lens, afterHurt } from '../core/bonds.js';
 import { combos } from '../core/drives.js';
 import { hints } from '../core/hints.js';
@@ -357,4 +357,95 @@ test('новые тропы: создатель и творение, один у
     assert.equal(ownSide({ ...p, own: '' }, 'Хеди'), false);
     assert.equal(ownSide(null, 'Хеди'), false);
     assert.equal(ownSide({ a: 'Хеди Барлоу', b: 'Баки Барнс', own: 'b' }, 'Баки', (x, y) => x.split(' ')[0] === y.split(' ')[0]), true);
+});
+
+// ───────────── 0.14 ─────────────
+test('0.14: способы «закаляет» и «лепит под себя» — свои цифры, свой ответ на удар, своя подсказка', () => {
+    assert.equal(styleId('закаляет'), 'forge');
+    assert.equal(styleId('лепит под себя'), 'mold');
+    const v = { E: { wor: -30 }, dr: { bond: 50 }, bel: 0.5 };
+    const plain = pairStats(LOVED, v);
+    const forge = pairStats(LOVED, { ...v, style: 'forge' });
+    const mold = pairStats(LOVED, { ...v, style: 'mold' });
+    assert.ok(forge.dread < plain.dread && forge.fuse < plain.fuse && forge.blur >= plain.blur, 'закаляет: потерять не боится, не ревнует, удар прощает');
+    assert.ok(mold.fuse > plain.fuse && mold.blur < plain.blur && mold.dread > plain.dread, 'лепит под себя: ревнует как собственник и несогласия не прощает');
+    const sure = pairStats(LOVED, { E: { wor: 20 }, dr: { bond: 80 } });
+    assert.equal(afterHurt(LOVED, sure, 'mold'), 'guard');
+    assert.equal(afterHurt(COSMIC, sure, 'forge'), 'stay');
+    for (const id of ['forge', 'mold']) {
+        assert.ok(STYLE_EASE[id].length > 30 && STYLE_OBJECT[id]);
+        assert.ok(!/(^|[^а-яё])(он|она|ему|ей|его|её|сам|сама|должен|готов)([^а-яё]|$)/i.test(`${STYLES[id].how} ${STYLES[id].kind} ${STYLE_EASE[id]}`), `${id}: без рода`);
+        assert.equal(statusHabit({ base: {} }, id), 'high');
+    }
+    assert.match(styleLine('forge', 'threat'), /до края даёт пройти без помощи, а на краю гибели вмешивается/);
+    assert.match(styleLine('mold', 'hurt'), /несогласие своего человека читает как предательство/);
+});
+
+test('0.14: у тропа со сторонами каждому — свои слова; не сказано, кто первый, — общая строка', () => {
+    const same = (x, y) => x === y;
+    const withLead = TROPE_IDS.filter(k => TROPES[k].lead);
+    assert.deepEqual(withLead, ['sibling', 'mentor', 'maker', 'uneven', 'erased', 'anchor']);
+    for (const k of withLead) {
+        const p = { a: 'А', b: 'Б', id: k, rom: 'no', lead: 'a' };
+        assert.equal(sideOf(p, 'А', same), 'lead');
+        assert.equal(sideOf(p, 'Б', same), 'other');
+        const one = tropeLine(p, 'Б', false, '', 'lead'), two = tropeLine(p, 'А', false, '', 'other'), both = tropeLine(p, 'Б');
+        assert.ok(one !== two && one !== both && two !== both, `${k}: три разные строки`);
+        for (const sd of ['lead', 'other']) for (const key of ['dyn', 'play', 'soft', 'dark']) {
+            const txt = TROPES[k].sides[sd][key];
+            if (txt) assert.ok(!/(^|[^а-яё])(он|она|ему|ей|сам|сама|должен|готов|вырос|вырастил|выковал)([^а-яё]|$)/i.test(txt), `${k}.${sd}.${key}: без рода — «${txt}»`);
+        }
+    }
+    assert.equal(sideOf({ a: 'А', b: 'Б', id: 'erased' }, 'А', same), '', 'первый не назван');
+    assert.equal(sideOf({ a: 'А', b: 'Б', id: 'hybrid', lead: 'a' }, 'А', same), '', 'у тропа сторон нет');
+    const er = { a: 'А', b: 'Б', id: 'erased', rom: 'no', lead: 'b' };
+    assert.match(pairLine(er, 'А', { side: sideOf(er, 'Б', same) }), /^с А — помнит всё, что между ними было, а в ответ — чистый лист/);
+    assert.match(pairLine(er, 'Б', { side: sideOf(er, 'А', same), dark: true }), /^с Б — не помнит между ними ничего[\s\S]*под давлением вылезает другое: чужое знание о себе настораживает/);
+    assert.match(pairLine({ ...er, lead: '' }, 'А'), /один помнит всё, что между ними было, другой не помнит ничего/);
+    assert.equal(tropeText('anchor', 'soft', 'lead'), 'редкая минута, когда ничего не надо держать: можно опереться в ответ');
+    assert.equal(tropeText('maker', 'play', 'lead'), TROPES.maker.play, 'чего у стороны нет — общее');
+    assert.deepEqual(tropeMul('erased', { warm: 2, loss: 2, blow: 2, threat: 3 }), { warm: 1.25, loss: 1.15 });
+    assert.deepEqual(tropeMul('anchor', { bound: 1, threat: 3 }), { bound: 1.15 }, 'сильное троп не трогает');
+});
+
+test('0.14: брак — слой поверх тропа: срок считает код по дню истории; до свадьбы слоя нет', () => {
+    assert.equal(wedNorm('24.12.2024'), '2024-12-24');
+    assert.equal(wedNorm('2024-6-5'), '2024-06-05');
+    assert.equal(wedNorm(' 2012 '), '2012');
+    assert.equal(wedNorm('Да'), 'yes');
+    assert.equal(wedNorm(true), 'yes');
+    for (const x of ['', null, 'нет', 'скоро', '2024-13-40', false]) assert.equal(wedNorm(x), '');
+    const T = '2024-12-27';
+    assert.deepEqual(wedSpan('2024-12-24', T), { stage: 'fresh', text: '3 дня', days: 3, years: 0 });
+    assert.equal(wedSpan('2024-12-27', T).text, 'с сегодняшнего дня');
+    assert.equal(wedSpan('2024-12-06', T).text, '3 недели');
+    assert.equal(wedSpan('2024-05-27', T).text, '7 месяцев');
+    assert.deepEqual([wedSpan('2023-12-27', T).text, wedSpan('2023-12-27', T).stage], ['1 год', 'mid']);
+    assert.deepEqual([wedSpan('2023-12-28', T).stage, wedSpan('2019-12-27', T).stage, wedSpan('2019-12-28', T).stage], ['fresh', 'long', 'mid']);
+    assert.deepEqual([wedSpan('2012', T).text, wedSpan('2012', T).stage, wedSpan('2024', T).text], ['12 лет', 'long', 'первый год']);
+    assert.equal(wedSpan('2025-01-10', T), null, 'на этот день ещё не женаты');
+    assert.equal(wedSpan('2025', T), null);
+    assert.equal(wedSpan('', T), null);
+    assert.deepEqual(wedSpan('yes', T), { stage: '', text: '', days: null, years: null });
+    assert.deepEqual(wedSpan('2012-06-01', ''), { stage: '', text: '', days: null, years: null }, 'день истории неизвестен — срок не считаем');
+    assert.equal(wedLine('2024-12-24', T), 'женаты 3 дня — это ещё новое, и «мы» звучит непривычно');
+    assert.equal(wedLine('2024-12-24', T, false, 'soft'), 'женаты 3 дня — слово «мы» ещё новое: взгляд то и дело находит кольцо');
+    assert.equal(wedLine('2021-03-01', T), 'женаты 3 года', 'между первым годом и пятым — только срок');
+    assert.equal(wedLine('2012', T, false, 'play'), 'женаты 12 лет — шутки старые, общие и понятные только двоим');
+    assert.equal(wedLine('yes', T), 'женаты');
+    assert.match(wedLine('2012', T, true), /^женаты 12 лет: хлопнуть дверью и уйти нельзя/);
+    assert.equal(wedLine('2025-01-10', T), '');
+    // годовщина — только при полной дате и не в день свадьбы
+    assert.equal(wedDay('2012-12-27', T), 12);
+    assert.equal(wedDay('2024-12-27', T), 0);
+    assert.equal(wedDay('2012-12-26', T), 0);
+    assert.equal(wedDay('2012', T), 0);
+    // троп и романтика остаются, брак ложится сверху; пары без тропа это тоже касается
+    const p = { a: 'А', b: 'Б', id: 'hybrid', rom: 'yes', wed: '2024-12-24' };
+    assert.equal(pairLine(p, 'Б', { today: T }), `${tropeLine(p, 'Б')}; женаты 3 дня — это ещё новое, и «мы» звучит непривычно`);
+    assert.match(pairLine(p, 'Б', { today: T, dark: true }), /под давлением вылезает другое: вдвоём безрассуднее[\s\S]*; женаты 3 дня: хлопнуть дверью и уйти нельзя — это и опора, и клетка$/);
+    assert.equal(pairLine(p, 'Б', { today: '2016-05-01' }), tropeLine(p, 'Б'), 'в чате до свадьбы — как без неё');
+    assert.equal(pairLine({ a: 'А', b: 'Б', id: '', rom: 'yes', wed: '2012' }, 'Б', { today: T }), 'с Б — женаты 12 лет: давно и привычно');
+    assert.equal(pairLine({ a: 'А', b: 'Б', id: '', rom: 'no' }, 'Б', { today: T }), '');
+    for (const tone of ['', 'soft', 'play']) for (const w of ['2024-12-24', '2012', '2021', 'yes']) assert.ok(!/(^|[^а-яё])(он|она|ему|ей|его|её|муж|жена|супруг|супруга)([^а-яё]|$)/i.test(wedLine(w, T, false, tone)), 'без рода');
 });

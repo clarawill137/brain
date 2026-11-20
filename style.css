@@ -203,3 +203,10 @@
 .brn-cast b { display: block; font: 600 14px var(--lf-sans); color: var(--lf-text); }
 .brn-cast small { display: block; margin-top: 3px; font-size: 12.5px; line-height: 1.4; color: var(--lf-dim); }
 .brn-cast .lf-chips { margin: 9px 0 4px; }
+
+/* 0.14: сторона тропа и брак в карточке пары */
+.brn-lead { margin-top: 6px; }
+.brn-lead select { width: 100%; min-width: 0; font-size: 13px; padding: 8px 26px 8px 10px; }
+.brn-wed { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.brn-wed label { flex: 0 0 auto; font-size: 12.5px; color: var(--lf-dim); }
+.brn-wed input { flex: 1 1 auto; min-width: 0; font-size: 13px; padding: 8px 10px; }

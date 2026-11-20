@@ -10,11 +10,11 @@ import { EMO_NAME, EMO_TITLE, EMO_ICON, WILL_TEXT, WILL_NAME, SINGLES, SINGLE_TI
 import { DRIVE_NAME, DRIVE_ICON, BAND_NAME, freshDrives, healDrives, driveHit, driveDecay, driveBand, combos } from './core/drives.js';
 import { hints } from './core/hints.js';
 import { SOFT, tie, pairStats, lens, haven, afterHurt, stayStyle, grudgeDecay } from './core/bonds.js';
-import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, ROM_NAME, tropeLine, tropeMul, ownSide, rejectOf, SPINE_KEYS, SPINE_NAME, hasSpine, spineLine } from './core/attach.js';
+import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, ROM_NAME, tropeMul, ownSide, sideOf, tropeText, pairLine, wedNorm, wedSpan, wedDay, rejectOf, SPINE_KEYS, SPINE_NAME, hasSpine, spineLine } from './core/attach.js';
 import { STAGE_NAME, stageOf, tolOf, drink, sober, boozeNow, DRUNK, HUNG, SEEN, SEEN_HUNG, playerTips } from './core/booze.js';
 import { KINDS, KIND_NAME as CHEM_NAME, KIND_ICON as CHEM_ICON, STAGE as CHEM_STAGE, AFTER as CHEM_AFTER, stageOf as chemStage, chemTol, take, wear, chemStages, chemNow, chemLines, seenLines, chemTips } from './core/chem.js';
 
-const VERSION = '0.13.0';
+const VERSION = '0.14.0';
 const ID = 'brain';
 const TITLE = '🧠 Мозг';
 const NARR = /рассказчик|narrator|мастер|game ?master|(^|[^a-z])gm([^a-z]|$)|мнемозина/i;
@@ -229,8 +229,10 @@ function setPair(a, b, patch) {
     let p = pairOf(a, b);
     if (!p) { p = { a: A.canonName(a), b: A.canonName(b), id: '', rom: 'no' }; list.push(p); }
     Object.assign(p, patch);
-    // пара без тропа живёт, только если в ней отмечено «намертво»
-    if (!TROPES[p.id] && !p.own) list.splice(list.indexOf(p), 1);
+    // пара без тропа живёт, только если в ней отмечено «намертво» или брак
+    if (!p.lead || !TROPES[p.id]?.lead) delete p.lead;
+    if (!p.wed) delete p.wed;
+    if (!TROPES[p.id] && !p.own && !p.wed) list.splice(list.indexOf(p), 1);
     relCache.clear();
     saveM();
 }
@@ -444,6 +446,8 @@ function dayShift(day, n) {
     d.setDate(d.getDate() + n);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+/** Сегодняшний день истории как «ГГГГ-ММ-ДД» (или '', если Life его не знает). */
+const isoToday = () => dayShift(nowStamp().day, 0);
 /** «ММ-ДД» дня истории (или ''). */
 function mdOf(day) {
     const d = day ? A.parseDate(day) : null;
@@ -638,6 +642,16 @@ function signals(who, t = temperOf(who), s = stateOf(who)) {
         const eve = mdOf(dayShift(today, 1));
         const de = eve ? t.dates.find(d => d.md === eve) : null;
         if (de) { add('eve', `завтра: ${de.t}`, de.kind === 'blow' ? { wor: -4, val: -3 } : { val: -5, aro: -3 }); out.eve = de; }
+    }
+    // годовщина свадьбы: день тёплый; считает код — по дате свадьбы в паре
+    if (mech('style')) {
+        const iso = dayShift(today, 0);
+        const wp = iso ? pairs().find(p => p.wed && (A.sameName(p.a, who) || A.sameName(p.b, who)) && wedDay(p.wed, iso)) : null;
+        if (wp) {
+            const to = A.sameName(wp.a, who) ? wp.b : wp.a;
+            out.wedDay = { to: A.canonName(to), years: wedDay(wp.wed, iso), text: wedSpan(wp.wed, iso)?.text || '' };
+            add('wedday', `сегодня: годовщина свадьбы (${out.wedDay.text})`, { val: 8, aro: 3 });
+        }
     }
     // утро после плохой ночи
     if (s?.night?.bad && s.night.day === today) {
@@ -1112,7 +1126,8 @@ const hungText = (t, bz) => `${str(t.cass?.hung, 320) ? `${bz.hung === 2 ? 'тя
 /** С кем из тех, кто в сцене, у него троп: сначала тот, от кого только что прилетело или кого ревнует, потом самый близкий. */
 function tropeWith(who, v, here = present()) {
     const { s } = v;
-    const all = bondsOf(who, s, v.E, v.t).filter(b => b.tr && TROPES[b.tr.id] && inScene(b.to, here));
+    const iso = isoToday();
+    const all = bondsOf(who, s, v.E, v.t).filter(b => b.pr && (TROPES[b.pr.id] || wedSpan(b.pr.wed, iso)) && inScene(b.to, here));
     if (!all.length) return null;
     const hot = all.find(b => (s.hurtBy && A.sameName(s.hurtBy.to, b.to)) || (num(s.jeal) >= 25 && A.sameName(s.jealTo, b.to)));
     return hot || all[0];
@@ -1152,7 +1167,7 @@ function depthBits(who, v, press, choosing, hard) {
     // «хочу» растёт из убеждения о себе: шатается — начинает видеть, что ему нужно; сломалось — может выбрать «нужно»
     const seeing = s.belBroke && lastI - s.belBroke.mes <= 40 ? 2 : t.beliefs.some(b => { const hp = P.beliefHp(s, b.id); return hp > 0 && hp <= 40; }) ? 1 : 0;
     const tone = toneOf(v);
-    const trope = (dark) => (pair ? tropeLine(pair.tr, short(pair.to), dark, tone) : '');
+    const trope = (dark) => (pair ? pairLine(pair.pr, short(pair.to), { dark, tone, side: sideOf(pair.pr, who, A.sameName), today: isoToday() }) : '');
     if (press) {
         // один блок, не оба: на развилке и когда прижало всерьёз важнее стержень, иначе — троп с его тёмной стороной
         const spine = sp && (choosing || hard) ? spineLine(sp, choosing ? 'choice' : 'press', seeing) : '';
@@ -1223,6 +1238,7 @@ function note(who) {
     if (sig.night && num(s.night?.n) < 6) extra.push(`ночь была плохой — ${cassText(t, 'night')}`);
     if (sig.date) extra.push(`сегодня ${sig.date.t} — помнит этот день телом, вслух может и не сказать`);
     else if (sig.eve) extra.push(`завтра ${sig.eve.t} — уже чувствует приближение: тише обычного, спать будет плохо; об этом не заговорит`);
+    if (sig.wedDay && !sig.date) extra.push(`сегодня годовщина свадьбы с ${short(sig.wedDay.to)} — ${sig.wedDay.text}: помнит об этом с утра, и отметит по-своему, даже если вслух не скажет`);
     const bel = beliefBit(v);
     if (bel) extra.push(bel);
     if (sig.loose && !bz?.stage && sig.list.some(x => x.id === 'fx-alc')) extra.push('под алкоголем: тормоза слабее, скрываемое ближе к поверхности');
@@ -1287,6 +1303,7 @@ function ripeOf() {
         if (num(sig.chem?.on.stim) >= 2) found.push([6, `${W} на взводе от стимулятора: тянет на рискованное, не сидится`]);
         if (sig.chem?.afterAny) found.push([5, `у ${W} откат после лекарства: сил и терпения меньше обычного`]);
         if (sig.date) found.push([7, `сегодня ${sig.date.t} — ${W} помнит этот день`]);
+        if (sig.wedDay) found.push([4, `сегодня у ${W} годовщина свадьбы (${sig.wedDay.text})`]);
         const weak = t.beliefs.map(b => [b, P.beliefHp(s, b.id)]).filter(([, hp]) => hp > 0 && hp <= 40).sort((a, b) => a[1] - b[1])[0];
         if (weak) found.push([6, `убеждение «${weak[0].t}», с которым живёт ${W}, вот-вот рухнет`]);
         if (s.strain >= 60) found.push([5, `${W}: нервы на пределе${sig.list.length ? ` (${sig.list.slice(0, 2).map(x => x.text).join(', ')})` : ''}`]);
@@ -1332,7 +1349,7 @@ cass — кассеты: КАК ИМЕННО ОН ведёт себя на ка�
 fix — 3–6 вещей, которые возвращают его в себя, когда плохо (по 1–4 слова, из лорбука: голос близкого, счёт вслух, дело для рук, холодная вода…). beliefs — 1–3 глубинных убеждения о себе, с которыми он живёт и которые мешают принимать хорошее: t — его словами, 2–6 слов («я испорченный»); truth — что станет его правдой, если убеждение сломается, 3–10 слов. dates — дни в году, которые он помнит телом (годовщина гибели, день, когда всё сломалось): md — месяц и день «ММ-ДД», t — что это за день, 2–6 слов, kind — loss (утрата) или blow (вина, стыд). Только если в записях есть точные день и месяц; не выдумывай — иначе [].
 want — насколько ему нужна каждая потребность, от 0.6 до 1.5 (1 — как всем): bond — близость и прикосновения; safe — безопасность и контроль над обстановкой; free — свобода решать самому; need — быть нужным и полезным; quiet — тишина и покой от людей (выше у замкнутых); novel — новизна и движение (выше у тех, кому скучно в покое).`;
 
-const ATTACH_LIST = 'fuse — намертво: залипает целиком, свой человек становится центром, без него не живёт, а пережидает; guard — сторож: любит охраной и делом, о чувствах молчит, считает, что такого не заслуживает; armor — в броне: держит на длину руки шуткой и делом, но замечает всё и приходит первым; fix — чинит: любит через решения, подарки и контроль обстановки, двигатель — вина; test — проверяет: колет и дразнит, проверяя, останутся ли, страх выдаёт за злость; serve — жертвует собой: ставит себя между своим и бедой, свои нужды не считает; secure — спокойно и ровно, без надрыва (редкость у травмированных)';
+const ATTACH_LIST = 'fuse — намертво: залипает целиком, свой человек становится центром, без него не живёт, а пережидает; guard — сторож: любит охраной и делом, о чувствах молчит, считает, что такого не заслуживает; armor — в броне: держит на длину руки шуткой и делом, но замечает всё и приходит первым; fix — чинит: любит через решения, подарки и контроль обстановки, двигатель — вина; test — проверяет: колет и дразнит, проверяя, останутся ли, страх выдаёт за злость; serve — жертвует собой: ставит себя между своим и бедой, свои нужды не считает; forge — закаляет: любит, делая сильнее, — испытывает и даёт боли случиться, если она закалит; погибнуть не даст и считает это заботой (наставник или родитель, растивший как оружие); mold — лепит под себя: видит в своём человеке продолжение себя, гордится, пока тот отражает, и перекраивает, когда тот выбирает своё; secure — спокойно и ровно, без надрыва (редкость у травмированных)';
 
 const DEPTH_RULE = `
 attach — КАК он привязывается к своим людям (одно слово из списка): ${ATTACH_LIST}. reject — рана отвержения: насколько он заранее ждёт, что его бросят или предадут, от 0.6 до 1.8 (1 — как все; 1.4 и выше — у брошенных, преданных, выращенных как оружие). booze — как его берёт алкоголь: 0.6 — пьянеет с бокала, 1 — как всех, 1.5 — привычный, 3–5 — сверхчеловеческий обмен (суперсолдат): почти не берёт.
@@ -1391,7 +1408,7 @@ async function topUp(who) {
 }
 
 const CAST_SYS = () => `Ты расставляешь для «код-мозга» ролевой истории две вещи: КАК каждый герой привязывается к своим людям и ЧТО между героями — на ту дату, в которой идёт этот чат. Суди по карточкам, лорбукам (и своду всей истории, если он дан). Ответь только одним JSON по-русски:
-{"people":[{"name":"имя","attach":"guard","reject":1,"booze":1,"why":"почему так, 5–14 слов"}],"pairs":[{"a":"имя","b":"имя","trope":"hybrid","rom":"no","own":"none","fact":"","why":"почему так, 5–14 слов"}]}
+{"people":[{"name":"имя","attach":"guard","reject":1,"booze":1,"why":"почему так, 5–14 слов"}],"pairs":[{"a":"имя","b":"имя","trope":"hybrid","lead":"","rom":"no","wed":"","own":"none","fact":"","why":"почему так, 5–14 слов"}]}
 people — все герои из списка. У персонажа игрока нужен только booze: способ привязываться и чувства там решает игрок — attach и reject не ставь.
 attach — способ привязываться к своим (одно слово из списка): ${ATTACH_LIST}.
 Смотри на всех героев сразу и сравнивай их между собой: способ у каждого свой. Выбирай то, чем человек отличается от остальных, а не самое общее для травмированных; одинаковый способ у двоих допустим, только если эти двое и правда привязываются одинаково.
@@ -1399,8 +1416,11 @@ reject — рана отвержения: насколько человек за
 booze — как человека берёт алкоголь: 0.6 — пьянеет с бокала, 1 — как всех, 1.5 — привычка, 3–5 — сверхчеловеческий обмен: почти не берёт. Тоже сравнением.
 pairs — что между двумя героями.
 trope — по какому сценарию эти двое существуют вместе (одно слово из списка):
-${TROPE_IDS.map(k => `${k} — ${TROPES[k].name}: ${TROPES[k].dyn}`).join('\n')}
+${TROPE_IDS.map(k => `${k} — ${TROPES[k].name}: ${TROPES[k].dyn}${TROPES[k].lead ? ` (первая сторона — ${TROPES[k].lead})` : ''}`).join('\n')}
+Ни один сценарий не подходит — оставь trope пустым; не натягивай ближайший.
+lead — только для тропов, у которых названа первая сторона: кто из двоих она — "a" или "b". У остальных тропов — "".
 rom — yes: это любовь, и оба это знают; hint: больше, чем дружба, но вслух этого нет; no — романтики нет.
+wed — женаты ли эти двое на дату чата: дата свадьбы "ГГГГ-ММ-ДД", если она названа в текстах; иначе год "ГГГГ"; иначе "yes". Не женаты или поженятся позже этой даты — "". Брак — не троп и его не заменяет: троп ставь как обычно.
 own — кто к кому УЖЕ привязан намертво (что бы ни случилось, не отвернётся и простит что угодно): "a" — только первый ко второму, "b" — только второй к первому, "both" — оба, "none" — обычная связь, которая ещё складывается. Не завышай: «намертво» — это годы и общая беда за плечами, а не симпатия, не долг службы и не первая влюблённость. Ставь его, только если можешь назвать в fact, что эти двое на эту дату уже пережили вместе (что случилось — одной фразой, из данных тебе текстов); назвать нечего — "none" и пустой fact.
 Пары: каждый герой с персонажем игрока и герои между собой — только там, где между ними на эту дату действительно что-то есть. Не знакомы, едва знакомы или друг другу никто — пару пропусти. Имена пиши ровно так, как они даны. Не больше шестнадцати пар.`;
 
@@ -1409,7 +1429,7 @@ const OWN_CHECK_SYS = `Ты перепроверяешь чужую расста
 const samePair = (p, a, b) => (A.sameName(p.a, a) && A.sameName(p.b, b)) || (A.sameName(p.a, b) && A.sameName(p.b, a));
 /**
  * Строки пар из ответа (ИИ или готового файла): имена — только из состава чата, «намертво» — только с названным
- * фактом. loose — пускать и пару без тропа, если у неё есть «намертво» (так пишут готовую расстановку).
+ * фактом. Пара без тропа остаётся, если у неё есть «намертво» или брак. loose — готовый файл: пар может быть больше.
  */
 function castRows(j, cast, { loose = false, src = '' } = {}) {
     const known = (n) => { const x = str(n, 60); const c = x ? cast.find(y => A.sameName(y, x)) : ''; return c ? A.canonName(c) : ''; };
@@ -1420,8 +1440,10 @@ function castRows(j, cast, { loose = false, src = '' } = {}) {
         const fact = str(r.fact, 200);
         const own = ['a', 'b', 'both'].includes(r.own) && fact.length > 5 ? r.own : '';
         const id = TROPES[r.trope] ? r.trope : '';
-        if (!id && !(loose && own)) continue;
-        rows.push({ a, b, id, rom: ROM_NAME[r.rom] ? r.rom : 'no', own, why: str(r.why, 140), fact: own ? fact : '', by: 'ai', ...(src ? { src } : {}) });
+        const wed = wedNorm(r.wed);
+        const lead = TROPES[id]?.lead && (r.lead === 'a' || r.lead === 'b') ? r.lead : '';
+        if (!id && !wed && !own) continue;
+        rows.push({ a, b, id, rom: ROM_NAME[r.rom] ? r.rom : 'no', own, why: str(r.why, 140), fact: own ? fact : '', by: 'ai', ...(src ? { src } : {}), ...(lead ? { lead } : {}), ...(wed ? { wed } : {}) });
     }
     return rows;
 }
@@ -1787,6 +1809,7 @@ function hintsHtml(v, who) {
         booze: v.sig.booze ? { stage: v.sig.booze.stage, hung: v.sig.booze.hung, blank: v.sig.booze.blank } : null,
         chem: v.sig.chem?.any ? { on: v.sig.chem.on, after: v.sig.chem.after, sed: v.sig.chem.sedDeep || 0, fog: v.sig.chem.fog } : null,
         spine: mech('spine') && hasSpine(v.t.spine) ? v.t.spine : null,
+        wedDay: v.sig.wedDay ? { name: short(v.sig.wedDay.to), mine: A.sameName(v.sig.wedDay.to, user()), text: v.sig.wedDay.text } : null,
         ease: mech('style') ? STYLE_EASE[styleId(v.t.attach)] || '' : '',
         mute: v.combo.some(c => c.id === 'mute') ? STYLE_OBJECT[styleId(v.t.attach)] || 'mute' : '',
     });
@@ -1818,8 +1841,16 @@ function bondsHtml(v, who) {
         const note = tr.hand ? '✋ вписано руками — ИИ не тронет' : tr.her ? 'так решила ты — ИИ не тронет' : tr.by === 'ai' ? `${tr.src === 'ready' ? 'Расставлено заранее' : 'ИИ'}: ${tr.why || 'по истории'}` : '';
         const nr = nearOf(who, b.to);
         const near = nr ? `<div class="brn-near"><b>Похоже, связь сравнялась.</b><small>У ${esc(short(who))} к ${esc(short(b.to))} любовь ${nr.love} и близость ${nr.close} — держатся уже ответов: ${nr.n}. Мозг сам ничего не меняет: решаешь ты.</small><div class="lf-chips"><button class="lf-chip" data-bact="near-yes" data-who="${esc(who)}" data-to="${esc(b.to)}">да, теперь оба намертво</button><button class="lf-chip" data-bact="near-no" data-who="${esc(who)}" data-to="${esc(b.to)}">нет, рано</button></div></div>` : '';
-        return `<div class="brn-own">${ownSel}</div>${near}${note ? `<div class="lf-hint brn-by">${esc(note)}</div>` : ''}<div class="brn-trope"><select data-bin="tr" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Троп пары">${opt('', tr.id, 'троп не задан')}${TROPE_IDS.map(k => opt(k, tr.id, TROPES[k].name)).join('')}</select><select data-bin="rom" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Романтика"${tr.id ? '' : ' disabled'}>${Object.entries(ROM_NAME).map(([k, l]) => opt(k, tr.rom || 'no', l)).join('')}</select></div>
-            ${TROPES[tr.id] ? `<div class="lf-hint">${esc(cap(TROPES[tr.id].dyn))}. Под давлением: ${esc(TROPES[tr.id].dark)}.</div>` : ''}`;
+        const T = TROPES[tr.id];
+        const sd = sideOf(tr, who, A.sameName);
+        const leadSel = T?.lead ? `<div class="brn-lead"><select data-bin="lead" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Кто в паре ${esc(T.lead)}">${opt('', tr.lead || '', `${T.lead}: не сказано`)}${opt(side(who), tr.lead || '', `${T.lead} — ${short(who)}`)}${opt(side(b.to), tr.lead || '', `${T.lead} — ${short(b.to)}`)}</select></div>` : '';
+        const iso = isoToday();
+        const sp = wedSpan(tr.wed, iso);
+        const wedHint = !tr.wed ? '' : sp ? `Женаты${sp.text ? ` ${sp.text}` : ''} — считает мозг по дню истории.` : 'На день этого чата ещё не женаты — слой молчит.';
+        // поле брака — у пар с романтикой (или где брак уже отмечен): остальным оно только удлиняет карточку
+        const wedRow = tr.wed || tr.rom === 'yes' || tr.rom === 'hint' ? `<div class="brn-wed"><label>В браке с</label><input type="text" data-bin="wed" data-who="${esc(who)}" data-to="${esc(b.to)}" value="${esc(tr.wed === 'yes' ? 'да' : tr.wed || '')}" placeholder="дата свадьбы, год или «да»" aria-label="Дата свадьбы"></div>${wedHint ? `<div class="lf-hint">${esc(wedHint)} Троп и способ привязываться остаются: брак ложится поверх.</div>` : ''}` : '';
+        return `<div class="brn-own">${ownSel}</div>${near}${note ? `<div class="lf-hint brn-by">${esc(note)}</div>` : ''}<div class="brn-trope"><select data-bin="tr" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Троп пары">${opt('', tr.id, 'троп не задан')}${TROPE_IDS.map(k => opt(k, tr.id, TROPES[k].name)).join('')}</select><select data-bin="rom" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Романтика"${tr.id || tr.wed ? '' : ' disabled'}>${Object.entries(ROM_NAME).map(([k, l]) => opt(k, tr.rom || 'no', l)).join('')}</select></div>${leadSel}
+            ${T ? `<div class="lf-hint">${esc(cap(tropeText(tr.id, 'dyn', sd)))}. Под давлением: ${esc(tropeText(tr.id, 'dark', sd))}.</div>` : ''}${wedRow}`;
     };
     const row = (b) => {
         const fed = Object.entries(v.s.feed?.[b.to] || {}).filter(([, x]) => x >= 15).sort((a, c) => c[1] - a[1]).slice(0, 2).map(([k]) => DRIVE_NAME[k].toLowerCase());
@@ -2225,6 +2256,8 @@ function onChange(ev) {
         if (kind === 'sp' && SPINE_KEYS.includes(k)) editTemper(who, (t) => { t.spine[k] = str(String(el.value || '').replace(/\s+/g, ' '), 180); t.v = TEMPER_V; });
         if (kind === 'tr') { setPair(who, el.dataset.to, { id: TROPES[el.value] ? el.value : '', hand: true }); syncPins(); }
         if (kind === 'rom' && pairOf(who, el.dataset.to)) setPair(who, el.dataset.to, { rom: ROM_NAME[el.value] ? el.value : 'no', hand: true });
+        if (kind === 'lead' && pairOf(who, el.dataset.to)) { setPair(who, el.dataset.to, { lead: el.value === 'a' || el.value === 'b' ? el.value : '', hand: true }); safe(() => A.updatePrompt()); }
+        if (kind === 'wed') { setPair(who, el.dataset.to, { wed: wedNorm(el.value), hand: true }); safe(() => A.updatePrompt()); }
         if (kind === 'own') { setPair(who, el.dataset.to, { own: ['a', 'b', 'both'].includes(el.value) ? el.value : '', hand: true }); syncPins(); safe(() => A.updatePrompt()); }
         if (kind === 'circle') { M().circle = linesOf(el.value).map(x => str(x, 40)).filter(Boolean).slice(0, 12); M().circleAuto = false; saveM(); relCache.clear(); syncPins(); }   // вписано руками — эпоха круг больше не чистит
         if (kind === 'f') editTemper(who, (t) => { t.fix = linesOf(el.value); t.src = 'hand'; });

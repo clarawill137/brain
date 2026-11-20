@@ -1994,3 +1994,116 @@ test('0.13: готовая расстановка — файл рядом с р�
     Object.assign(st.ext.brain.prof[N], { styleBy: '' });
     st.md.brain.pairs = []; st.pins = {}; st.md.brain.circlePins = []; delete st.md.brain.bondsAt; delete st.md.brain.meTol; delete st.md.brain.meTolBy;
 });
+
+// ───────────── 0.14 ─────────────
+const dayPlus = (n) => { const [y, m, d] = world.timestamp.story_date.split('-').map(Number); const x = new Date(y, m - 1, d + n); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
+test('0.14: брак ложится поверх тропа и способа привязываться — ничего не снимая; срок считает мозг', async () => {
+    pairUp('hybrid', 'yes');
+    st.pins = {}; st.md.brain.circlePins = [];
+    setStyle('guard');
+    await fresh(14400);
+    change({ bin: 'wed', who: B, to: 'Хеди Барлоу' }, dayPlus(-3));
+    assert.deepEqual(st.md.brain.pairs, [{ a: 'Хеди', b: 'Баки', id: 'hybrid', rom: 'yes', wed: dayPlus(-3), hand: true }], 'троп и романтика на месте');
+    assert.equal(st.ext.brain.prof[B].attach, 'guard', 'способ привязываться на месте');
+    let rows = three();
+    assert.equal(count(rows, /с Хеди — равные, которые отражают друг друга[\s\S]*это любовь, и оба это знают; женаты 3 дня — это ещё новое/), 1, rows.join('\n'));
+    assert.equal(count(rows, /привязанность выражает охраной и делом/), 1, 'строка способа идёт своим чередом');
+    let html = st.shelf.tracker.html();
+    assert.match(html, /<option value="hybrid" selected>Доктор и Клара<\/option>/);
+    assert.match(html, /В браке с<\/label><input type="text" data-bin="wed"[^>]*value="\d{4}-\d{2}-\d{2}"/);
+    assert.match(html, /Женаты 3 дня — считает мозг по дню истории\. Троп и способ привязываться остаются: брак ложится поверх\./);
+    // под давлением — ставка
+    next([{ who: 'Баки', threat: 3, why: 'засада на трассе' }]);
+    assert.match(mod.prompt('normal'), /с Хеди — равные[\s\S]*под давлением вылезает другое: вдвоём безрассуднее[\s\S]*женаты 3 дня: хлопнуть дверью и уйти нельзя/);
+    // свадьба ещё впереди (чат раньше по времени) — слой молчит
+    await fresh(14424);
+    change({ bin: 'wed', who: B, to: 'Хеди Барлоу' }, dayPlus(10));
+    rows = three();
+    assert.equal(count(rows, /с Хеди — равные/), 1);
+    assert.equal(count(rows, /женаты/), 0);
+    assert.match(st.shelf.tracker.html(), /На день этого чата ещё не женаты — слой молчит\./);
+    // годовщина: день тёплый, и мозг о нём помнит сам
+    await fresh(14448);
+    const [y, m, d] = world.timestamp.story_date.split('-');
+    change({ bin: 'wed', who: B, to: 'Хеди Барлоу' }, `${d}.${m}.${+y - 3}`);
+    assert.equal(st.md.brain.pairs[0].wed, `${+y - 3}-${m}-${d}`, 'дату можно писать и по-нашему');
+    assert.match(mod.prompt('normal'), /сегодня годовщина свадьбы с Хеди — 3 года/);
+    assert.match(st.shelf.tracker.html(), /brn-sig[\s\S]*сегодня: годовщина свадьбы \(3 года\)/);
+    assert.match(st.shelf.tracker.html(), /сегодня ваша годовщина свадьбы \(3 года\): здесь об этом помнят с утра/);
+    // троп сняли — пара живёт браком; сняли и брак — пары нет
+    change({ bin: 'tr', who: B, to: 'Хеди Барлоу' }, '', { tagName: 'SELECT' });
+    assert.equal(st.md.brain.pairs.length, 1);
+    rows = three();
+    assert.equal(count(rows, /с Хеди — женаты 3 года/), 1, rows.join('\n'));
+    change({ bin: 'wed', who: B, to: 'Хеди Барлоу' }, '');
+    assert.equal(st.md.brain.pairs.length, 0);
+    change({ bin: 'wed', who: B, to: 'Хеди Барлоу' }, 'да');
+    assert.deepEqual(st.md.brain.pairs, [{ a: 'Баки Барнс', b: 'Хеди Барлоу', id: '', rom: 'no', wed: 'yes', hand: true }]);
+    st.md.brain.pairs = []; st.md.brain.circle = [];
+});
+
+test('0.14: троп со сторонами — в заметку идут слова своей стороны; кто первый, правится в листе', async () => {
+    st.md.brain.circle = []; st.md.brain.circleAuto = false; st.pins = {}; st.md.brain.circlePins = [];
+    st.md.brain.pairs = [{ a: 'Хеди', b: 'Баки', id: 'erased', rom: 'no', lead: 'b' }];
+    setStyle('guard');
+    await fresh(14500);
+    let rows = three();
+    assert.equal(count(rows, /с Хеди — помнит всё, что между ними было, а в ответ — чистый лист/), 1, rows.join('\n'));
+    let html = st.shelf.tracker.html();
+    assert.match(html, /<option value="b" selected>кто помнит — Баки<\/option>/);
+    assert.match(html, /Помнит всё, что между ними было, а в ответ — чистый лист[\s\S]*Под давлением: это утрата без похорон/);
+    change({ bin: 'lead', who: B, to: 'Хеди Барлоу' }, 'a', { tagName: 'SELECT' });
+    rows = three();
+    assert.equal(count(rows, /с Хеди — не помнит между ними ничего: почти незнакомый человек/), 1, rows.join('\n'));
+    change({ bin: 'lead', who: B, to: 'Хеди Барлоу' }, '', { tagName: 'SELECT' });
+    assert.equal(st.md.brain.pairs[0].lead, undefined);
+    rows = three();
+    assert.equal(count(rows, /с Хеди — один помнит всё, что между ними было, другой не помнит ничего/), 1);
+    // сменили троп на тот, где сторон нет, — «кто первый» уходит вместе с ним
+    change({ bin: 'lead', who: B, to: 'Хеди Барлоу' }, 'b', { tagName: 'SELECT' });
+    change({ bin: 'tr', who: B, to: 'Хеди Барлоу' }, 'comrades', { tagName: 'SELECT' });
+    assert.equal(st.md.brain.pairs[0].lead, undefined);
+    assert.ok(!/data-bin="lead"/.test(st.shelf.tracker.html()));
+    st.md.brain.pairs = [];
+});
+
+test('0.14: ИИ знает новые способы, стороны тропов и брак — и расставляет их; пара без тропа живёт браком или «намертво»', async () => {
+    st.md.brain.circle = []; st.md.brain.circleAuto = false; st.md.brain.pairs = []; st.pins = {}; st.md.brain.circlePins = [];
+    delete st.md.brain.bondsAt; delete st.md.brain.castFrom;
+    Object.assign(st.ext.brain.prof[B], { styleBy: '' }); Object.assign(st.ext.brain.prof[N], { styleBy: '' });
+    await fresh(14600);
+    st.depth = {
+        people: [{ name: 'Баки Барнс', attach: 'forge', reject: 0.6, booze: 1, why: 'растит и испытывает' }, { name: 'Наташа Романофф', attach: 'mold', reject: 1.1, booze: 1, why: 'видит продолжение себя' }],
+        pairs: [
+            { a: 'Хеди Барлоу', b: 'Баки Барнс', trope: 'anchor', lead: 'a', rom: 'yes', wed: '2012', own: 'none', why: 'держит землю под ногами' },
+            { a: 'Баки Барнс', b: 'Наташа Романофф', trope: '', lead: 'a', rom: 'no', wed: 'yes', own: 'none', why: 'сценария в списке нет' },
+            { a: 'Хеди Барлоу', b: 'Наташа Романофф', trope: 'comrades', lead: 'b', rom: 'no', wed: 'когда-нибудь', own: 'none', why: 'служат вместе' },
+        ],
+    };
+    const before = st.deep.length + st.fill.length;
+    await click({ bact: 'bonds-fill', who: B });
+    const asked = st.deep.concat(st.fill).map(x => x.messages?.[0]?.content || '').filter(x => /расставляешь для «код-мозга»/.test(x)).pop();
+    assert.ok(st.deep.length + st.fill.length > before);
+    assert.match(asked, /forge — закаляет[\s\S]*mold — лепит под себя/);
+    assert.match(asked, /erased — один помнит, другой нет:[^\n]*\(первая сторона — кто помнит\)\nanchor — якорь и шторм:[^\n]*\(первая сторона — якорь\)/);
+    assert.match(asked, /Ни один сценарий не подходит — оставь trope пустым/);
+    assert.match(asked, /lead — только для тропов, у которых названа первая сторона/);
+    assert.match(asked, /wed — женаты ли эти двое на дату чата[\s\S]*Брак — не троп и его не заменяет/);
+    assert.deepEqual(st.md.brain.pairs, [
+        { a: 'Хеди Барлоу', b: 'Баки Барнс', id: 'anchor', rom: 'yes', own: '', why: 'держит землю под ногами', fact: '', by: 'ai', lead: 'a', wed: '2012' },
+        { a: 'Баки Барнс', b: 'Наташа Романофф', id: '', rom: 'no', own: '', why: 'сценария в списке нет', fact: '', by: 'ai', wed: 'yes' },
+        { a: 'Хеди Барлоу', b: 'Наташа Романофф', id: 'comrades', rom: 'no', own: '', why: 'служат вместе', fact: '', by: 'ai' },
+    ], 'сторона — только у тропа со сторонами; брак — только в понятном виде');
+    assert.deepEqual([st.ext.brain.prof[B].attach, st.ext.brain.prof[N].attach], ['forge', 'mold']);
+    const html = st.shelf.tracker.html();
+    assert.match(html, /Привязывается: закаляет/);
+    assert.match(html, /<option value="forge" selected>закаляет<\/option>[\s\S]*<option value="mold">лепит под себя<\/option>/);
+    st.md.brain.circle = ['Хеди', 'Баки'];                    // свои — тогда в ход идёт и строка способа
+    const rows = three();
+    assert.equal(count(rows, /с Хеди — несётся, зная, что есть куда вернуться[\s\S]*это любовь, и оба это знают; женаты \d+ (год|года|лет)/), 1, rows.join('\n'));
+    assert.equal(count(rows, /рядом со своим человеком — внимательный учитель/), 1, rows.join('\n'));
+    st.md.brain.circle = []; st.pins = {}; st.md.brain.circlePins = [];
+    st.depth = null;
+    st.md.brain.pairs = []; delete st.md.brain.bondsAt; delete st.md.brain.castFrom;
+    Object.assign(st.ext.brain.prof[B], { attach: 'guard', styleBy: '' }); Object.assign(st.ext.brain.prof[N], { styleBy: '' });
+});
