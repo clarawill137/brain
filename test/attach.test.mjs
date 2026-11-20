@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as P from '../core/psyche.js';
-import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, tropeLine, tropeMul, ownSide, sideOf, tropeText, pairLine, wedNorm, wedSpan, wedDay, wedLine, rejectOf, normSpine, hasSpine, spineLine } from '../core/attach.js';
+import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, tropeLine, tropeMul, ownSide, sideOf, tropeText, pairLine, wedNorm, wedSpan, wedDay, wedLine, kidNorm, kidSpan, kidLine, rejectOf, normSpine, hasSpine, spineLine } from '../core/attach.js';
 import { tie, pairStats, lens, afterHurt } from '../core/bonds.js';
 import { combos } from '../core/drives.js';
 import { hints } from '../core/hints.js';
@@ -384,7 +384,7 @@ test('0.14: способы «закаляет» и «лепит под себя�
 test('0.14: у тропа со сторонами каждому — свои слова; не сказано, кто первый, — общая строка', () => {
     const same = (x, y) => x === y;
     const withLead = TROPE_IDS.filter(k => TROPES[k].lead);
-    assert.deepEqual(withLead, ['sibling', 'mentor', 'maker', 'uneven', 'erased', 'anchor']);
+    assert.deepEqual(withLead, ['sibling', 'mentor', 'maker', 'uneven', 'parent', 'erased', 'anchor']);
     for (const k of withLead) {
         const p = { a: 'А', b: 'Б', id: k, rom: 'no', lead: 'a' };
         assert.equal(sideOf(p, 'А', same), 'lead');
@@ -450,4 +450,39 @@ test('0.14: брак — слой поверх тропа: срок считае
     assert.equal(pairLine({ a: 'А', b: 'Б', id: '', rom: 'yes', wed: '2012' }, 'Б', { today: T }), 'с Б — женаты 12 лет: давно и привычно');
     assert.equal(pairLine({ a: 'А', b: 'Б', id: '', rom: 'no' }, 'Б', { today: T }), '');
     for (const tone of ['', 'soft', 'play']) for (const w of ['2024-12-24', '2012', '2021', 'yes']) assert.ok(!/(^|[^а-яё])(он|она|ему|ей|его|её|муж|жена|супруг|супруга)([^а-яё]|$)/i.test(wedLine(w, T, false, tone)), 'без рода');
+});
+
+// ───────────── 0.16 ─────────────
+test('0.16: дети — у каждого способа свой родитель; троп «родитель и ребёнок»; общий ребёнок — слой поверх пары', () => {
+    const kids = STYLE_IDS.map(id => STYLES[id].kid);
+    assert.equal(new Set(kids).size, STYLE_IDS.length, 'родитель из каждого свой');
+    for (const id of STYLE_IDS) {
+        assert.ok(STYLES[id].kid.length > 40 && /^с ребёнком/.test(STYLES[id].kid), id);
+        assert.ok(!/(^|[^а-яё])(он|она|ему|ей|его|её|сам|сама|должен|готов)([^а-яё]|$)/i.test(STYLES[id].kid), `${id}.kid: без рода`);
+    }
+    const p = { a: 'А', b: 'Б', id: 'parent', rom: 'no', lead: 'a' };
+    assert.match(pairLine(p, 'Б', { side: sideOf(p, 'А') }), /^с Б — здесь родитель: отвечает за этого человека целиком/);
+    assert.match(pairLine(p, 'А', { side: sideOf(p, 'Б'), tone: 'soft' }), /^с А — здесь ребёнок[\s\S]*сейчас — приходит под бок без слов/);
+    assert.deepEqual(tropeMul('parent', { threat: 2, warm: 1, blow: 2 }), { threat: 1.2, warm: 1.15 });
+    // слой: ждут или растят — считает код
+    const T = '2024-12-27';
+    assert.deepEqual([kidNorm('ждут'), kidNorm('Беременна'), kidNorm('да'), kidNorm('10.08.2025'), kidNorm('2018'), kidNorm('нет')], ['wait', 'wait', 'yes', '2025-08-10', '2018', '']);
+    assert.deepEqual(kidSpan('wait', T), { due: true, text: '' });
+    assert.deepEqual(kidSpan('2025-08-10', T), { due: true, text: '7 месяцев' });
+    assert.deepEqual(kidSpan('2025-01-05', T), { due: true, text: '9 дней' });
+    assert.deepEqual(kidSpan('2024-10-01', T), { due: false, text: '2 месяца' });
+    assert.deepEqual(kidSpan('2018-03-01', T), { due: false, text: '6 лет' });
+    assert.deepEqual(kidSpan('2018', T), { due: false, text: '6 лет' });
+    assert.deepEqual(kidSpan('2026', T), { due: true, text: '' });
+    assert.equal(kidSpan('', T), null);
+    assert.equal(kidLine('wait', T), 'ждут ребёнка');
+    assert.equal(kidLine('2025-08-10', T, false, 'soft'), 'ждут ребёнка (до срока — 7 месяцев) — планы теперь на троих, и рука сама тянется прикрыть');
+    assert.match(kidLine('wait', T, true), /страх теперь за двоих/);
+    assert.equal(kidLine('2018', T, false, '', 'fix'), `растят ребёнка (6 лет); ${STYLES.fix.kid}`, 'какой это родитель — из способа привязываться');
+    assert.equal(kidLine('2018', T, false, '', ''), 'растят ребёнка (6 лет)');
+    assert.match(kidLine('2018', T, true, '', 'fix'), /^растят ребёнка \(6 лет\): всё, что грозит ребёнку, отключает осторожность$/);
+    // троп, брак и ребёнок — вместе; пара без тропа живёт и одним ребёнком
+    const q = { a: 'А', b: 'Б', id: 'hybrid', rom: 'yes', wed: '2024-12-24', kid: 'wait' };
+    assert.equal(pairLine(q, 'Б', { today: T, style: 'guard' }), `${tropeLine(q, 'Б')}; женаты 3 дня — это ещё новое, и «мы» звучит непривычно; ждут ребёнка`);
+    assert.equal(pairLine({ a: 'А', b: 'Б', id: '', rom: 'no', kid: '2018' }, 'Б', { today: T, style: 'secure' }), `с Б — растят ребёнка (6 лет); ${STYLES.secure.kid}`);
 });

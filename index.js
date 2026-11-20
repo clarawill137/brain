@@ -10,11 +10,11 @@ import { EMO_NAME, EMO_TITLE, EMO_ICON, WILL_TEXT, WILL_NAME, SINGLES, SINGLE_TI
 import { DRIVE_NAME, DRIVE_ICON, BAND_NAME, freshDrives, healDrives, driveHit, driveDecay, driveBand, combos } from './core/drives.js';
 import { hints } from './core/hints.js';
 import { SOFT, tie, pairStats, lens, haven, afterHurt, stayStyle, grudgeDecay } from './core/bonds.js';
-import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, ROM_NAME, tropeMul, ownSide, sideOf, tropeText, pairLine, wedNorm, wedSpan, wedDay, rejectOf, SPINE_KEYS, SPINE_NAME, hasSpine, spineLine } from './core/attach.js';
+import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, ROM_NAME, tropeMul, ownSide, sideOf, tropeText, pairLine, wedNorm, wedSpan, wedDay, kidNorm, kidSpan, rejectOf, SPINE_KEYS, SPINE_NAME, hasSpine, spineLine } from './core/attach.js';
 import { STAGE_NAME, stageOf, tolOf, drink, sober, boozeNow, DRUNK, HUNG, SEEN, SEEN_HUNG, playerTips } from './core/booze.js';
 import { KINDS, KIND_NAME as CHEM_NAME, KIND_ICON as CHEM_ICON, STAGE as CHEM_STAGE, AFTER as CHEM_AFTER, stageOf as chemStage, chemTol, take, wear, chemStages, chemNow, chemLines, seenLines, chemTips } from './core/chem.js';
 
-const VERSION = '0.15.0';
+const VERSION = '0.16.0';
 const ID = 'brain';
 const TITLE = '🧠 Мозг';
 const NARR = /рассказчик|narrator|мастер|game ?master|(^|[^a-z])gm([^a-z]|$)|мнемозина/i;
@@ -232,7 +232,8 @@ function setPair(a, b, patch) {
     // пара без тропа живёт, только если в ней отмечено «намертво» или брак
     if (!p.lead || !TROPES[p.id]?.lead) delete p.lead;
     if (!p.wed) delete p.wed;
-    if (!TROPES[p.id] && !p.own && !p.wed) list.splice(list.indexOf(p), 1);
+    if (!p.kid) delete p.kid;
+    if (!TROPES[p.id] && !p.own && !p.wed && !p.kid) list.splice(list.indexOf(p), 1);
     relCache.clear();
     saveM();
 }
@@ -1133,7 +1134,7 @@ const hungText = (t, bz) => `${str(t.cass?.hung, 320) ? `${bz.hung === 2 ? 'тя
 function tropeWith(who, v, here = present()) {
     const { s } = v;
     const iso = isoToday();
-    const all = bondsOf(who, s, v.E, v.t).filter(b => b.pr && (TROPES[b.pr.id] || wedSpan(b.pr.wed, iso)) && inScene(b.to, here));
+    const all = bondsOf(who, s, v.E, v.t).filter(b => b.pr && (TROPES[b.pr.id] || wedSpan(b.pr.wed, iso) || kidSpan(b.pr.kid, iso)) && inScene(b.to, here));
     if (!all.length) return null;
     const hot = all.find(b => (s.hurtBy && A.sameName(s.hurtBy.to, b.to)) || (num(s.jeal) >= 25 && A.sameName(s.jealTo, b.to)));
     return hot || all[0];
@@ -1173,7 +1174,7 @@ function depthBits(who, v, press, choosing, hard) {
     // «хочу» растёт из убеждения о себе: шатается — начинает видеть, что ему нужно; сломалось — может выбрать «нужно»
     const seeing = s.belBroke && lastI - s.belBroke.mes <= 40 ? 2 : t.beliefs.some(b => { const hp = P.beliefHp(s, b.id); return hp > 0 && hp <= 40; }) ? 1 : 0;
     const tone = toneOf(v);
-    const trope = (dark) => (pair ? pairLine(pair.pr, short(pair.to), { dark, tone, side: sideOf(pair.pr, who, A.sameName), today: isoToday() }) : '');
+    const trope = (dark) => (pair ? pairLine(pair.pr, short(pair.to), { dark, tone, side: sideOf(pair.pr, who, A.sameName), today: isoToday(), style }) : '');
     if (press) {
         // один блок, не оба: на развилке и когда прижало всерьёз важнее стержень, иначе — троп с его тёмной стороной
         const spine = sp && (choosing || hard) ? spineLine(sp, choosing ? 'choice' : 'press', seeing) : '';
@@ -1414,7 +1415,7 @@ async function topUp(who) {
 }
 
 const CAST_SYS = () => `Ты расставляешь для «код-мозга» ролевой истории две вещи: КАК каждый герой привязывается к своим людям и ЧТО между героями — на ту дату, в которой идёт этот чат. Суди по карточкам, лорбукам (и своду всей истории, если он дан). Ответь только одним JSON по-русски:
-{"people":[{"name":"имя","attach":"guard","reject":1,"booze":1,"why":"почему так, 5–14 слов"}],"pairs":[{"a":"имя","b":"имя","trope":"hybrid","lead":"","rom":"no","wed":"","own":"none","fact":"","why":"почему так, 5–14 слов"}]}
+{"people":[{"name":"имя","attach":"guard","reject":1,"booze":1,"why":"почему так, 5–14 слов"}],"pairs":[{"a":"имя","b":"имя","trope":"hybrid","lead":"","rom":"no","wed":"","kid":"","own":"none","fact":"","why":"почему так, 5–14 слов"}]}
 people — все герои из списка. У персонажа игрока нужен только booze: способ привязываться и чувства там решает игрок — attach и reject не ставь.
 attach — способ привязываться к своим (одно слово из списка): ${ATTACH_LIST}.
 Смотри на всех героев сразу и сравнивай их между собой: способ у каждого свой. Выбирай то, чем человек отличается от остальных, а не самое общее для травмированных; одинаковый способ у двоих допустим, только если эти двое и правда привязываются одинаково.
@@ -1427,6 +1428,7 @@ ${TROPE_IDS.map(k => `${k} — ${TROPES[k].name}: ${TROPES[k].dyn}${TROPES[k].le
 lead — только для тропов, у которых названа первая сторона: кто из двоих она — "a" или "b". У остальных тропов — "".
 rom — yes: это любовь, и оба это знают; hint: больше, чем дружба, но вслух этого нет; no — романтики нет.
 wed — женаты ли эти двое на дату чата: дата свадьбы "ГГГГ-ММ-ДД", если она названа в текстах; иначе год "ГГГГ"; иначе "yes". Не женаты или поженятся позже этой даты — "". Брак — не троп и его не заменяет: троп ставь как обычно.
+kid — есть ли у этих двоих общий ребёнок на дату чата: дата рождения "ГГГГ-ММ-ДД" (ожидаемая — тоже, если названа); иначе год; "wait" — ждут, срок не назван; "yes" — ребёнок есть, возраст не назван; нет — "". Если сам ребёнок — герой из списка, его связь с каждым из родителей — отдельная пара с тропом parent.
 own — кто к кому УЖЕ привязан намертво (что бы ни случилось, не отвернётся и простит что угодно): "a" — только первый ко второму, "b" — только второй к первому, "both" — оба, "none" — обычная связь, которая ещё складывается. Не завышай: «намертво» — это годы и общая беда за плечами, а не симпатия, не долг службы и не первая влюблённость. Ставь его, только если можешь назвать в fact, что эти двое на эту дату уже пережили вместе (что случилось — одной фразой, из данных тебе текстов); назвать нечего — "none" и пустой fact.
 Пары: каждый герой с персонажем игрока и герои между собой — только там, где между ними на эту дату действительно что-то есть. Не знакомы, едва знакомы или друг другу никто — пару пропусти. Имена пиши ровно так, как они даны. Не больше шестнадцати пар.`;
 
@@ -1498,10 +1500,10 @@ function castRows(j, cast, { loose = false, src = '' } = {}) {
         const fact = str(r.fact, 200);
         const own = ['a', 'b', 'both'].includes(r.own) && fact.length > 5 ? r.own : '';
         const id = TROPES[r.trope] ? r.trope : '';
-        const wed = wedNorm(r.wed);
+        const wed = wedNorm(r.wed), kid = kidNorm(r.kid);
         const lead = TROPES[id]?.lead && (r.lead === 'a' || r.lead === 'b') ? r.lead : '';
-        if (!id && !wed && !own) continue;
-        rows.push({ a, b, id, rom: ROM_NAME[r.rom] ? r.rom : 'no', own, why: str(r.why, 140), fact: own ? fact : '', by: 'ai', ...(src ? { src } : {}), ...(lead ? { lead } : {}), ...(wed ? { wed } : {}) });
+        if (!id && !wed && !kid && !own) continue;
+        rows.push({ a, b, id, rom: ROM_NAME[r.rom] ? r.rom : 'no', own, why: str(r.why, 140), fact: own ? fact : '', by: 'ai', ...(src ? { src } : {}), ...(lead ? { lead } : {}), ...(wed ? { wed } : {}), ...(kid ? { kid } : {}) });
     }
     return rows;
 }
@@ -1917,8 +1919,11 @@ function bondsHtml(v, who) {
         const wedHint = !tr.wed ? '' : sp ? `Женаты${sp.text ? ` ${sp.text}` : ''} — считает мозг по дню истории.` : 'На день этого чата ещё не женаты — слой молчит.';
         // поле брака — у пар с романтикой (или где брак уже отмечен): остальным оно только удлиняет карточку
         const wedRow = tr.wed || tr.rom === 'yes' || tr.rom === 'hint' ? `<div class="brn-wed"><label>В браке с</label><input type="text" data-bin="wed" data-who="${esc(who)}" data-to="${esc(b.to)}" value="${esc(tr.wed === 'yes' ? 'да' : tr.wed || '')}" placeholder="дата свадьбы, год или «да»" aria-label="Дата свадьбы"></div>${wedHint ? `<div class="lf-hint">${esc(wedHint)} Троп и способ привязываться остаются: брак ложится поверх.</div>` : ''}` : '';
+        const ks = kidSpan(tr.kid, iso);
+        const kidHint = !ks ? '' : ks.due ? `Ждут ребёнка${ks.text ? ` — до срока ${ks.text}` : ''}.` : `Растят ребёнка${ks.text ? ` — ${ks.text}` : ''}. Какой из ${short(who)} родитель — из способа привязываться${sty?.kid ? `: ${sty.kid}` : ' (он ещё не задан)'}.`;
+        const kidRow = tr.kid || tr.wed || tr.rom === 'yes' ? `<div class="brn-wed"><label>Ребёнок</label><input type="text" data-bin="kid" data-who="${esc(who)}" data-to="${esc(b.to)}" value="${esc(tr.kid === 'yes' ? 'да' : tr.kid === 'wait' ? 'ждут' : tr.kid || '')}" placeholder="дата рождения или срока, год, «ждут», «да»" aria-label="Общий ребёнок"></div>${kidHint ? `<div class="lf-hint">${esc(kidHint)}</div>` : ''}` : '';
         return `<div class="brn-own">${ownSel}</div>${near}${note ? `<div class="lf-hint brn-by">${esc(note)}</div>` : ''}<div class="brn-trope"><select data-bin="tr" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Троп пары">${opt('', tr.id, 'троп не задан')}${TROPE_IDS.map(k => opt(k, tr.id, TROPES[k].name)).join('')}</select><select data-bin="rom" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Романтика"${tr.id || tr.wed ? '' : ' disabled'}>${Object.entries(ROM_NAME).map(([k, l]) => opt(k, tr.rom || 'no', l)).join('')}</select></div>${leadSel}
-            ${T ? `<div class="lf-hint">${esc(cap(tropeText(tr.id, 'dyn', sd)))}. Под давлением: ${esc(tropeText(tr.id, 'dark', sd))}.</div>` : ''}${wedRow}`;
+            ${T ? `<div class="lf-hint">${esc(cap(tropeText(tr.id, 'dyn', sd)))}. Под давлением: ${esc(tropeText(tr.id, 'dark', sd))}.</div>` : ''}${wedRow}${kidRow}`;
     };
     const row = (b) => {
         const fed = Object.entries(v.s.feed?.[b.to] || {}).filter(([, x]) => x >= 15).sort((a, c) => c[1] - a[1]).slice(0, 2).map(([k]) => DRIVE_NAME[k].toLowerCase());
@@ -2326,6 +2331,7 @@ function onChange(ev) {
         if (kind === 'rom' && pairOf(who, el.dataset.to)) setPair(who, el.dataset.to, { rom: ROM_NAME[el.value] ? el.value : 'no', hand: true });
         if (kind === 'lead' && pairOf(who, el.dataset.to)) { setPair(who, el.dataset.to, { lead: el.value === 'a' || el.value === 'b' ? el.value : '', hand: true }); safe(() => A.updatePrompt()); }
         if (kind === 'wed') { setPair(who, el.dataset.to, { wed: wedNorm(el.value), hand: true }); safe(() => A.updatePrompt()); }
+        if (kind === 'kid') { setPair(who, el.dataset.to, { kid: kidNorm(el.value), hand: true }); safe(() => A.updatePrompt()); }
         if (kind === 'own') { setPair(who, el.dataset.to, { own: ['a', 'b', 'both'].includes(el.value) ? el.value : '', hand: true }); syncPins(); safe(() => A.updatePrompt()); }
         if (kind === 'circle') { M().circle = linesOf(el.value).map(x => str(x, 40)).filter(Boolean).slice(0, 12); M().circleAuto = false; saveM(); relCache.clear(); syncPins(); }   // вписано руками — эпоха круг больше не чистит
         if (kind === 'f') editTemper(who, (t) => { t.fix = linesOf(el.value); t.src = 'hand'; });

@@ -2204,3 +2204,42 @@ test('0.15: под лекарством герой держится по-сво�
     Object.assign(st.ext.brain.prof[B], { attach: 'guard', styleBy: '', styleWhy: '' }); delete st.ext.brain.prof[B].styleFull;
     for (const c of ['sed', 'pain', 'stim']) delete st.ext.brain.prof[B].cass[c];
 });
+
+// ───────────── 0.16 ─────────────
+test('0.16: общий ребёнок — в листе, в заметке и в расстановке ИИ; троп и брак при этом на месте', async () => {
+    pairUp('hybrid', 'yes');
+    st.pins = {}; st.md.brain.circlePins = [];
+    setStyle('guard');
+    await fresh(16000);
+    change({ bin: 'wed', who: B, to: 'Хеди Барлоу' }, dayPlus(-3));
+    change({ bin: 'kid', who: B, to: 'Хеди Барлоу' }, 'ждут');
+    assert.deepEqual(st.md.brain.pairs, [{ a: 'Хеди', b: 'Баки', id: 'hybrid', rom: 'yes', wed: dayPlus(-3), hand: true, kid: 'wait' }]);
+    let rows = three();
+    assert.equal(count(rows, /с Хеди — равные[\s\S]*женаты 3 дня[\s\S]*; ждут ребёнка/), 1, rows.join('\n'));
+    assert.match(st.shelf.tracker.html(), /Ребёнок<\/label><input type="text" data-bin="kid"[^>]*value="ждут"[\s\S]*Ждут ребёнка\./);
+    // родился — мозг считает возраст, а какой из героя родитель — берёт из его способа
+    change({ bin: 'kid', who: B, to: 'Хеди Барлоу' }, dayPlus(-70));
+    rows = three();
+    assert.equal(count(rows, /растят ребёнка \(2 месяца\); с ребёнком — тот же сторож: проверяет замки и дыхание во сне/), 1, rows.join('\n'));
+    assert.match(st.shelf.tracker.html(), /Растят ребёнка — 2 месяца\. Какой из Баки родитель — из способа привязываться: с ребёнком — тот же сторож/);
+    // сняли троп и брак — пара живёт ребёнком; сняли и его — пары нет
+    change({ bin: 'tr', who: B, to: 'Хеди Барлоу' }, '', { tagName: 'SELECT' });
+    change({ bin: 'wed', who: B, to: 'Хеди Барлоу' }, '');
+    assert.equal(st.md.brain.pairs.length, 1);
+    change({ bin: 'kid', who: B, to: 'Хеди Барлоу' }, '');
+    assert.equal(st.md.brain.pairs.length, 0);
+    // ИИ: знает поле kid и троп parent
+    delete st.md.brain.bondsAt; delete st.md.brain.castFrom; st.md.brain.circle = [];
+    st.depth = { people: [], pairs: [
+        { a: 'Хеди Барлоу', b: 'Баки Барнс', trope: '', rom: 'yes', wed: '', kid: '2023', own: 'none', why: 'общий ребёнок' },
+        { a: 'Баки Барнс', b: 'Наташа Романофф', trope: 'parent', lead: 'a', rom: 'no', kid: 'когда-нибудь', own: 'none', why: 'растит' }] };
+    await click({ bact: 'bonds-fill', who: B });
+    const asked = st.deep.concat(st.fill).map(x => x.messages?.[0]?.content || '').filter(x => /расставляешь для «код-мозга»/.test(x)).pop();
+    assert.match(asked, /parent — родитель и ребёнок:[^\n]*\(первая сторона — родитель\)/);
+    assert.match(asked, /kid — есть ли у этих двоих общий ребёнок на дату чата[\s\S]*отдельная пара с тропом parent/);
+    assert.deepEqual(st.md.brain.pairs, [
+        { a: 'Хеди Барлоу', b: 'Баки Барнс', id: '', rom: 'yes', own: '', why: 'общий ребёнок', fact: '', by: 'ai', kid: '2023' },
+        { a: 'Баки Барнс', b: 'Наташа Романофф', id: 'parent', rom: 'no', own: '', why: 'растит', fact: '', by: 'ai', lead: 'a' },
+    ]);
+    st.depth = null; st.md.brain.pairs = []; delete st.md.brain.bondsAt; delete st.md.brain.castFrom;
+});
