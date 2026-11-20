@@ -92,7 +92,8 @@ test('тропы: строка пары, тёмная сторона — тол�
     assert.match(calm, /^с Хеди — равные/);
     assert.match(calm, /это любовь/);
     assert.ok(!/под давлением/.test(calm));
-    assert.match(tropeLine({ id: 'hybrid', rom: 'hint' }, 'Наташа', true), /вслух этого нет[\s\S]*под давлением вылезает другое[\s\S]*не умеет другого отпустить/);
+    assert.match(tropeLine({ id: 'hybrid', rom: 'hint' }, 'Наташа', true), /нет названия[\s\S]*вслух этого нет[\s\S]*под давлением вылезает другое[\s\S]*не умеет другого отпустить[\s\S]*тесно всем остальным/);
+    assert.match(tropeLine({ id: 'sisters', rom: 'no' }, 'Елена', true), /подначки вдруг смолкают — это и есть сигнал тревоги/);
     assert.ok(!/это любовь|вслух этого/.test(tropeLine({ id: 'kin', rom: 'no' }, 'Тони')));
     assert.equal(tropeLine({ id: 'нет такого' }, 'Хеди'), '');
     assert.equal(tropeLine(null, 'Хеди'), '');
@@ -117,6 +118,8 @@ test('стержень: в тихой сцене — чем живёт; под �
     assert.match(spineLine(sp, 'choice'), /^решает из своего «хочу»: искупить[\s\S]*нужно другое: поверить[\s\S]*пока не видит[\s\S]*боится: снова стать оружием/);
     assert.ok(!/хочет выглядеть|читает через/.test(spineLine(sp, 'choice')));
     assert.match(spineLine(sp, 'choice', true), /уже начинает это видеть/);
+    assert.match(spineLine(sp, 'choice', 1), /уже начинает это видеть/);
+    assert.match(spineLine(sp, 'choice', 2), /впервые может выбрать второе, даже ценой первого/);
     assert.equal(spineLine(normSpine({}), 'press'), '');
 });
 
