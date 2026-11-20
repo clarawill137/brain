@@ -61,8 +61,8 @@ export const CASS = {
     leak: 'пауза перед ответом длиннее, взгляд уходит, фраза обрывается на середине, руки выдают раньше слов',
 };
 /** Кассеты одной строкой (не по ступеням). */
-export const SINGLES = ['brk', 'hang', 'care', 'night', 'leak', 'drunk', 'hung'];
-export const SINGLE_TITLE = { brk: '⚡ Срыв', hang: '🌫 После срыва', care: '🫳 Тревога за близкого', night: '🌙 Утро после плохой ночи', leak: '🎭 Как проступает скрываемое', drunk: '🥃 Под градусом', hung: '🤕 С похмелья' };
+export const SINGLES = ['brk', 'hang', 'care', 'night', 'leak', 'drunk', 'hung', 'sed', 'pain', 'stim'];
+export const SINGLE_TITLE = { brk: '⚡ Срыв', hang: '🌫 После срыва', care: '🫳 Тревога за близкого', night: '🌙 Утро после плохой ночи', leak: '🎭 Как проступает скрываемое', drunk: '🥃 Под градусом', hung: '🤕 С похмелья', sed: '💊 Под успокоительным', pain: '🩹 Под сильным обезболивающим', stim: '🔥 На стимуляторе' };
 
 /** Как воля меняет поведение (модели — только когда её мало). */
 export const WILL_TEXT = [

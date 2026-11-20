@@ -403,7 +403,9 @@ test('0.14: у тропа со сторонами каждому — свои с
     assert.match(pairLine(er, 'Б', { side: sideOf(er, 'А', same), dark: true }), /^с Б — не помнит между ними ничего[\s\S]*под давлением вылезает другое: чужое знание о себе настораживает/);
     assert.match(pairLine({ ...er, lead: '' }, 'А'), /один помнит всё, что между ними было, другой не помнит ничего/);
     assert.equal(tropeText('anchor', 'soft', 'lead'), 'редкая минута, когда ничего не надо держать: можно опереться в ответ');
-    assert.equal(tropeText('maker', 'play', 'lead'), TROPES.maker.play, 'чего у стороны нет — общее');
+    assert.equal(tropeText('hybrid', 'play', 'lead'), TROPES.hybrid.play, 'у тропа сторон нет — общее');
+    assert.match(tropeLine({ a: 'А', b: 'Б', id: 'sibling', rom: 'no' }, 'Б', false, 'soft', 'other'), /здесь младший[\s\S]*сейчас — приваливается плечом и замолкает/);
+    assert.match(tropeLine({ a: 'А', b: 'Б', id: 'maker', rom: 'no' }, 'Б', false, 'play', 'lead'), /сейчас — проверяет ходом и вопросом с двойным дном/);
     assert.deepEqual(tropeMul('erased', { warm: 2, loss: 2, blow: 2, threat: 3 }), { warm: 1.25, loss: 1.15 });
     assert.deepEqual(tropeMul('anchor', { bound: 1, threat: 3 }), { bound: 1.15 }, 'сильное троп не трогает');
 });

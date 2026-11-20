@@ -7,7 +7,7 @@ const world = { timestamp: { story_date: '2024-12-01', story_time: '10:00' }, sc
 const chat = [];
 const post = (name, user = false) => { chat.push({ name, is_user: user, is_system: false, mes: '…', horae_meta: { timestamp: { ...world.timestamp } } }); return chat.length - 1; };
 const handlers = {};
-const st = { depth: null, ext: { brain: { auto: false } }, md: { brain: { circle: [] } }, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [], faces: [], rel: {}, story: null, fill: [], deep: [], route: null, pins: {} };
+const st = { styleAsked: [], styleAns: null, depth: null, ext: { brain: { auto: false } }, md: { brain: { circle: [] } }, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [], faces: [], rel: {}, story: null, fill: [], deep: [], route: null, pins: {} };
 
 const api = {
     ctx: () => ({ name1: 'Хеди Барлоу', extensionSettings: st.ext, chatMetadata: st.md, saveSettingsDebounced() {}, saveMetadataDebounced() {}, eventSource: { on() {} }, eventTypes: { CHAT_CHANGED: 'chat' } }),
@@ -34,6 +34,8 @@ const api = {
         st.asked++;
         const own = st.route ? st.route(messages || []) : null;
         if (own) return own;
+        // второй голос для способа привязываться (0.15): по умолчанию молчит — тогда всё остаётся как поставлено
+        if (/ОДНО решение: как этот герой привязывается/.test(messages?.[0]?.content || '')) { st.styleAsked.push(messages); return st.styleAns ? st.styleAns(messages) : {}; }
         return { ...(st.depth || {}), note: 'Держится ровно, вину носит молча.', base: { val: -5, aro: 5, ctl: 28, wor: -18 }, react: 0.9, recover: 0.7, grit: 1.5, sens: { blow: 1.4, bound: 1.5, threat: 0.7, warm: 0.8, wrong: 1, loss: 1.2 },
             cass: { shame: ['отводит глаза и трёт запястье живой руки', 'замолкает и уходит чинить что-нибудь руками', 'отказывается от её рук: «не надо, я грязный»', 'лицо пустеет, отвечает рапортом'], brk: 'лицо пустеет, тело собирается, речь сжимается до односложных рапортов' } };
     },
@@ -2106,4 +2108,99 @@ test('0.14: ИИ знает новые способы, стороны тропо
     st.depth = null;
     st.md.brain.pairs = []; delete st.md.brain.bondsAt; delete st.md.brain.castFrom;
     Object.assign(st.ext.brain.prof[B], { attach: 'guard', styleBy: '' }); Object.assign(st.ext.brain.prof[N], { styleBy: '' });
+});
+
+// ───────────── 0.15 ─────────────
+test('0.15: второй голос — способ каждого сверяется с его текстами отдельным запросом; согласие только с названным поступком', async () => {
+    st.md.brain.circle = []; st.md.brain.circleAuto = false; st.md.brain.pairs = []; st.pins = {}; st.md.brain.circlePins = [];
+    delete st.md.brain.bondsAt; delete st.md.brain.castFrom;
+    for (const k of [B, N]) { Object.assign(st.ext.brain.prof[k], { attach: '', styleBy: '', styleWhy: '' }); delete st.ext.brain.prof[k].styleFull; delete st.ext.brain.prof[k].styleSrc; delete st.ext.brain.prof[k].seeded; st.ext.brain.prof[k].cass = { ...st.ext.brain.prof[k].cass }; for (const c of ['sed', 'pain', 'stim']) delete st.ext.brain.prof[k].cass[c]; }
+    await fresh(15000);
+    st.depth = {
+        people: [{ name: 'Баки Барнс', attach: 'armor', reject: 1.2, booze: 1, why: 'сдержан и вежлив' }, { name: 'Наташа Романофф', attach: 'guard', reject: 1.1, booze: 1, why: 'стережёт молча' }],
+        pairs: [{ a: 'Хеди Барлоу', b: 'Баки Барнс', trope: 'comrades', rom: 'no', own: 'none', why: 'служат вместе' }],
+    };
+    st.styleAsked.length = 0;
+    st.styleAns = (msgs) => (/Персонаж: Баки/.test(msgs[1].content)
+        ? { attach: 'forge', proof: 'даёт пройти испытание без помощи и приходит только на краю', sed: 'перестаёт следить за дверью и говорит длиннее обычного', pain: 'улыбается чаще и отвечает с задержкой', stim: 'говорит без пауз и берётся чинить всё подряд' }
+        : { attach: 'guard', proof: 'садится между дверью и своим человеком, ничего не объясняя' });
+    const toasts = st.toasts.length;
+    await click({ bact: 'bonds-fill', who: B });
+    assert.equal(st.styleAsked.length, 2, 'по запросу на героя — только тем, кому способ поставила расстановка');
+    const ask = st.styleAsked.find(m => /Персонаж: Баки/.test(m[1].content));
+    assert.match(ask[0].content, /ОДНО решение: как этот герой привязывается[\s\S]*Сдержанность, вежливость и ирония сами по себе — ещё не «в броне»[\s\S]*Назвать нечего — верни attach пустым/);
+    assert.match(ask[1].content, /^Расстановка предлагает: armor — в броне \(сдержан и вежлив\)\.\n\nПерсонаж: Баки Барнс/);
+    const pb = st.ext.brain.prof[B], pn = st.ext.brain.prof[N];
+    assert.deepEqual([pb.attach, pb.styleBy, pb.styleWhy, pb.styleFull], ['forge', 'ai', 'даёт пройти испытание без помощи и приходит только на краю', 1], 'второй голос увидел другое — способ исправлен');
+    assert.deepEqual([pn.attach, pn.styleFull, pn.styleWhy], ['guard', 1, 'садится между дверью и своим человеком, ничего не объясняя'], 'согласился — подтверждено, довод теперь поступок');
+    assert.deepEqual([pb.reject, pb.booze], [1.2, 1], 'рана и алкоголь — от расстановки по составу: они ставятся сравнением');
+    assert.deepEqual([pb.cass.sed, pb.cass.stim], ['перестаёт следить за дверью и говорит длиннее обычного', 'говорит без пауз и берётся чинить всё подряд'], 'заодно — слова под лекарствами');
+    assert.ok(st.toasts.slice(toasts).some(x => /способ привязываться — 2 \(сверено с карточками — 2, из них исправлено — 1\)/.test(x[1])), JSON.stringify(st.toasts.slice(toasts)));
+    assert.match(st.shelf.tracker.html(), /ИИ, сверено с карточкой: даёт пройти испытание без помощи/);
+    assert.match(st.shelf.tracker.html(), /по короткому на героя: способ сверяется с его карточкой/);
+    // ещё раз по кнопке: сверенный способ расстановка по составу не перебивает и заново не проверяет
+    st.depth.people[0].reject = 0.9;
+    await click({ bact: 'bonds-fill', who: B });
+    assert.equal(st.styleAsked.length, 2);
+    assert.deepEqual([st.ext.brain.prof[B].attach, st.ext.brain.prof[B].styleFull, st.ext.brain.prof[B].reject], ['forge', 1, 0.9]);
+    // «не задано» руками — выбор снова у ИИ: расстановка ставит, второй голос проверяет заново
+    setStyle('');
+    assert.equal(st.ext.brain.prof[B].styleFull, undefined);
+    st.styleAns = () => ({ attach: '', proof: '' });                 // проверяющий не нашёл поступка — остаётся как поставлено, без пометки
+    await click({ bact: 'bonds-fill', who: B });
+    assert.equal(st.styleAsked.length, 3);
+    assert.deepEqual([st.ext.brain.prof[B].attach, st.ext.brain.prof[B].styleFull, st.ext.brain.prof[B].styleWhy], ['armor', undefined, 'сдержан и вежлив']);
+    assert.match(st.shelf.tracker.html(), /ИИ: сдержан и вежлив/);
+    // довода нет — согласие не считается; запрос упал — тоже ничего не ломается
+    st.styleAns = () => ({ attach: 'fix', proof: '' });
+    await click({ bact: 'bonds-fill', who: B });
+    assert.equal(st.ext.brain.prof[B].attach, 'armor');
+    st.styleAns = () => { throw new Error('сеть'); };
+    await click({ bact: 'bonds-fill', who: B });
+    assert.equal(st.ext.brain.prof[B].attach, 'armor');
+    assert.ok(st.md.brain.pairs.length === 1 && st.md.brain.castFrom === 'ai', 'расстановка при этом на месте');
+    // вписанное руками второй голос не проверяет вовсе
+    const n = st.styleAsked.length;
+    setStyle('test');
+    st.styleAns = () => ({ attach: 'fuse', proof: 'цепляется и не отпускает руку' });
+    await click({ bact: 'bonds-fill', who: B });
+    assert.equal(st.ext.brain.prof[B].attach, 'test');
+    assert.ok(!st.styleAsked.slice(n).some(m => /Персонаж: Баки/.test(m[1].content)));
+    st.depth = null; st.styleAns = null;
+    st.md.brain.pairs = []; delete st.md.brain.bondsAt; delete st.md.brain.castFrom;
+    for (const k of [B, N]) { Object.assign(st.ext.brain.prof[k], { attach: k === B ? 'guard' : '', styleBy: '', styleWhy: '' }); delete st.ext.brain.prof[k].styleFull; }
+});
+
+test('0.15: под лекарством герой держится по-своему; своих слов ещё нет — мозг спросит один раз, когда понадобились', async () => {
+    mechSet('chem', true);
+    st.md.brain.pairs = []; st.md.brain.circle = [];
+    Object.assign(st.ext.brain.prof[B], { booze: 1 });
+    st.ext.brain.prof[B].cass = { ...st.ext.brain.prof[B].cass, stim: 'говорит без пауз и берётся чинить всё подряд' };
+    for (const c of ['sed', 'pain']) delete st.ext.brain.prof[B].cass[c];
+    await fresh(15100);
+    st.styleAsked.length = 0;
+    next([{ who: 'Баки', took: 'stim', dose: 2 }]);
+    assert.match(mod.prompt('normal'), /на взводе от стимулятора[^\]]*; держится при этом так: говорит без пауз и берётся чинить всё подряд/);
+    assert.equal(st.styleAsked.length, 0, 'слова уже есть — спрашивать нечего; автосбор выключен — тоже');
+    assert.match(st.shelf.tracker.html(), /🔥 На стимуляторе<\/label>[\s\S]*говорит без пауз и берётся чинить всё подряд/);
+    // слишком много — тут все одинаковы, своей манеры уже нет
+    next([{ who: 'Баки', took: 'stim', dose: 3 }]);
+    assert.match(mod.prompt('normal'), /стимулятора слишком много/);
+    assert.ok(!/держится при этом так/.test(mod.prompt('normal')));
+    // своих слов под успокоительным нет: с включённым автосбором мозг спросит — один раз
+    await fresh(15130);
+    st.ext.brain.auto = true;
+    st.ext.brain.tried = {};
+    st.styleAns = () => ({ attach: 'fuse', proof: 'не отпускает руку ни на шаг', sed: 'перестаёт следить за дверью и говорит длиннее обычного' });
+    next([{ who: 'Баки', took: 'sed', dose: 1 }]);
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(st.styleAsked.length, 1);
+    assert.equal(st.ext.brain.prof[B].cass.sed, 'перестаёт следить за дверью и говорит длиннее обычного');
+    assert.match(mod.prompt('normal'), /под успокоительным[^\]]*; держится при этом так: перестаёт следить за дверью/);
+    next([{ who: 'Баки', took: 'pain', dose: 1 }]);
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(st.styleAsked.length, 1, 'не чаще раза в шесть часов');
+    st.ext.brain.auto = false; st.styleAns = null;
+    Object.assign(st.ext.brain.prof[B], { attach: 'guard', styleBy: '', styleWhy: '' }); delete st.ext.brain.prof[B].styleFull;
+    for (const c of ['sed', 'pain', 'stim']) delete st.ext.brain.prof[B].cass[c];
 });

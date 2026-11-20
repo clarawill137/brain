@@ -252,11 +252,20 @@ export const SEEN_AFTER = {
     stim: ['', 'вялость, зевает, раздражается', 'серое лицо, еле двигается, засыпает сидя'],
 };
 
-/** Строки «как играть» по тому, что сейчас действует: сначала само вещество, потом откаты. sedDeep — стадия седативного с учётом спиртного. */
-export function chemLines(cz) {
+/**
+ * Строки «как играть» по тому, что сейчас действует: сначала само вещество, потом откаты. sedDeep — стадия седативного
+ * с учётом спиртного. own — { sed, pain, stim }: какой именно этот человек под веществом. Одна и та же доза разных
+ * людей меняет по-разному, и разница идёт от характера (White, Lott, de Wit, 2006: настроение под амфетамином
+ * связано с бесстрашием и чувствительностью к награде).
+ */
+export function chemLines(cz, own = {}) {
     const out = [];
     if (!cz?.any) return out;
-    for (const k of KINDS) { const st = k === 'sed' ? cz.sedDeep || cz.on.sed : cz.on[k]; if (st) out.push(ON_TEXT[k][st]); }
+    // own — свои слова героя под этим веществом: на первых двух стадиях манера ещё его; на третьей все одинаковы
+    for (const k of KINDS) {
+        const st = k === 'sed' ? cz.sedDeep || cz.on.sed : cz.on[k];
+        if (st) out.push(`${ON_TEXT[k][st]}${st <= 2 && own?.[k] ? `; держится при этом так: ${own[k]}` : ''}`);
+    }
     for (const k of KINDS) if (cz.after[k] && !cz.on[k]) out.push(AFTER_TEXT[k][cz.after[k]]);
     if (cz.fog && !out.some(x => /кусками|провал|обрывки/.test(x))) out.push('этот час потом вспомнит кусками');
     return out;
