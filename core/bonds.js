@@ -6,6 +6,14 @@
 // а не в долг; регуляция риска (Murray, Holmes, Collins) — тянуться или закрываться решает уверенность в том, что
 // тебя ценят; социальная регуляция угрозы (Coan) — рядом со своим человеком угроза переносится легче.
 // Шкалы пары (0…100) приходят из Life; «Любовь» там ставит игрок и запирает. Чистая математика.
+//
+// Но это всё — про обычную, «здоровую» привязанность. У вымысла есть ещё одна: космическая (безусловная).
+// Образец — Двенадцатый Доктор и Клара: «Ты меня предала, предала наше доверие, всё, за что я стою» — и в ту же
+// минуту идёт за неё в ад: «думаешь, ты значишь для меня так мало, что предательство что-то изменит?»
+// Боль от такого удара настоящая и вслух названа, но на то, что он для неё сделает, она не влияет, и обидой
+// не оседает. Обратная сторона та же, что в сериале: ради своего человека нарушит собственные правила, не умеет
+// отпускать, и вдвоём они опаснее, чем по отдельности («Гибрид»). Другу такого не простят: там сильный удар
+// оставляет обиду.
 
 import { clamp } from './psyche.js';
 
@@ -21,17 +29,23 @@ export const GLOW = ['warm', 'open', 'calm'];        // то, что от сво
  * Названная любовь (шкала «Любовь») — это L напрямую. Без неё привязанность собирается из близости и доверия,
  * но не выше 0.8: дружба тоже держит, а единицу даёт только любовь.
  */
-export function tie(rel) {
-    if (!rel || typeof rel !== 'object') return null;
+export function tie(rel, opts = {}) {
+    // космическая — если так сказано (круг «своих») или любовь заперта на девяноста и выше: то, что заперто, ничем не сломать
+    const cosmic = !!opts.cosmic || (Number.isFinite(rel?.pin?.love) && rel.pin.love >= 90);
+    if ((!rel || typeof rel !== 'object') && !cosmic) return null;
+    rel = rel && typeof rel === 'object' ? rel : {};
     const f = (k, d = 0) => clamp(num(rel[k], d), 0, 100) / 100;
-    const love = f('love'), close = f('closeness', 50), trust = f('trust', 50);
+    const love = cosmic ? 1 : f('love'), close = cosmic ? 1 : f('closeness', 50), trust = f('trust', cosmic ? 80 : 50);
     const grown = clamp((0.7 * close + 0.3 * trust - 0.5) / 0.5, 0, 1) * 0.8;
+    // «накопилось»: напряжение в паре выше 55 начинает перекрашивать всё, что от него приходит.
+    // Космическую привязанность не перекрашивает: ссориться могут сколько угодно, линза остаётся
+    const sour = clamp((f('tension') - 0.55) / 0.35, 0, 1);
     return {
         love, close, trust, want: f('desire'), jeal: f('jealousy'), tens: f('tension'), guilt: f('guilt'),
         L: r2(Math.max(love, grown)),
-        fixed: Number.isFinite(rel.pin?.love),
-        // «накопилось»: напряжение в паре выше 55 начинает перекрашивать всё, что от него приходит
-        sour: r2(clamp((f('tension') - 0.55) / 0.35, 0, 1)),
+        fixed: cosmic || Number.isFinite(rel.pin?.love),
+        cosmic,
+        sour: r2(cosmic ? Math.min(sour, 0.25) : sour),
     };
 }
 
@@ -60,21 +74,28 @@ export function pairStats(t, v = {}) {
 
 /**
  * Линза: чем событие становится, если оно пришло от этого человека.
- * hits — { вид: сила }, t — tie(), st — pairStats().
+ * hits — { вид: сила }, t — tie(), st — pairStats(), opts.grudge — держит ли он на этого человека обиду (0…100).
  * → { kmul: { вид: множитель }, kmood: { вид: доля оседания в настроении }, tags: [] }
+ * Ещё метки: forgive — сильный удар от «своего» по космической привязанности: больно в полную силу, но обидой
+ * не осядет; grudge — сильный удар от того, кому доверял, но не «своего»: останется обида; cold — обида ещё держится.
  * Метки: blur — размыло, glow — от своего теплее, deep — от своего глубже, sour — накопилось, surprise — не ждал добра.
  * Поручень: линза не усиливает то, что и так сильное (3), — одно событие не должно уносить на последнюю ступень.
  */
-export function lens(hits, t, st) {
+export function lens(hits, t, st, opts = {}) {
     const out = { kmul: {}, kmood: {}, tags: [] };
     if (!t || !hits) return out;
     const tag = (x) => { if (!out.tags.includes(x)) out.tags.push(x); };
-    const L = t.L, b = num(st?.blur) / 100;
+    const L = t.L;
+    // пока держит обиду, любовь этого человека не размывает и тепло от него не греет
+    const cold = !t.cosmic && num(opts.grudge) >= 30;
+    const b = cold ? 0 : num(st?.blur) / 100;
+    if (cold) tag('cold');
     for (const [k, n0] of Object.entries(hits)) {
         const n = Math.round(clamp(n0, 0, 3));
         if (!n) continue;
         if (GLOW.includes(k)) {
             if (k === 'warm' && n >= 2 && t.trust < 0.3 && L < 0.3) { out.kmul[k] = 1.25; tag('surprise'); }   // добра от него не ждал — цепляет сильнее
+            else if (cold) { if (k === 'warm') out.kmul[k] = 0.8; }
             else if (L >= 0.3) { out.kmul[k] = r2(1 + 0.3 * L * (1 - t.sour)); if (L >= 0.5 && t.sour < 0.5) tag('glow'); }
         } else if (k === 'loss') {
             // уход своего человека: заметный — бьёт сильнее, сильный — не выше (он и так на потолке одного события),
@@ -84,9 +105,15 @@ export function lens(hits, t, st) {
         } else if (SOFT.includes(k)) {
             // сильное от своего любовь не размывает — и не усиливает: оно и так на потолке одного события.
             // Что оно пришло от своего, скажется потом: закроется он или пойдёт мириться (afterHurt)
-            if (n >= 3) { if (L >= 0.5) tag('deep'); }
-            else if (t.sour >= 0.5) { out.kmul[k] = r2(1 + 0.2 * t.sour); tag('sour'); }                // накопилось: и мелочь читается уколом
-            else if (b > 0) { out.kmul[k] = r2(1 - 0.45 * b); out.kmood[k] = r2(1 - 0.6 * b); if (b >= 0.4) tag('blur'); }
+            // А вот чем оно станет потом — зависит от привязанности: «своему» простят что угодно (боль настоящая,
+            // но в настроении почти не оседает и обидой не становится), другу — нет (останется обида)
+            if (n >= 3) {
+                if (t.cosmic) { out.kmood[k] = 0.45; tag('forgive'); }
+                else { if (L >= 0.2 || t.trust >= 0.6) tag('grudge'); if (L >= 0.5) tag('deep'); }
+            }
+            else if (cold) out.kmul[k] = 1.1;
+            else if (!cold && t.sour >= 0.5) { out.kmul[k] = r2(1 + 0.2 * t.sour); tag('sour'); }       // накопилось: и мелочь читается уколом
+            else if (!cold && b > 0) { out.kmul[k] = r2(1 - 0.45 * b); out.kmood[k] = r2(1 - 0.6 * b); if (b >= 0.4) tag('blur'); }
         } else if (k === 'rival') {
             out.kmul[k] = jealMul(st);
         }
@@ -114,5 +141,24 @@ export function haven(st, worry = false) {
  */
 export function afterHurt(t, st) {
     if (!t || t.L < 0.5) return '';
+    // космическая привязанность: что бы ни случилось, остаётся рядом — как именно, решит его характер (stayStyle)
+    if (t.cosmic) return 'stay';
     return num(st?.insecure) >= 0.5 ? 'guard' : 'mend';
+}
+
+/**
+ * Как человек остаётся рядом после удара от «своего» — зависит от личности:
+ *   inward — берёт на себя («так мне и надо»); fierce — говорит в лицо, не смягчая, и всё равно делает что нужно
+ *   (Двенадцатый); quiet — ни слова упрёка, делает дело, разговор откладывает.
+ * E — оси сейчас, dom — ведущее чувство.
+ */
+export function stayStyle(E, dom) {
+    if (dom?.id === 'shame' || num(E?.wor) <= -25) return 'inward';
+    if (dom?.id === 'anger' || (num(E?.val) < -15 && num(E?.ctl) >= 10)) return 'fierce';
+    return 'quiet';
+}
+
+/** Обида на того, кто предал и не «свой»: сколько держится — зависит от отходчивости (recover). hours — прошло часов. */
+export function grudgeDecay(v, hours, recover = 1) {
+    return clamp(num(v) * Math.pow(0.5, clamp(hours, 0, 24 * 60) / (72 / clamp(recover, 0.4, 2.5))), 0, 100);
 }

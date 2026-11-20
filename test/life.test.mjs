@@ -7,7 +7,7 @@ const world = { timestamp: { story_date: '2024-12-01', story_time: '10:00' }, sc
 const chat = [];
 const post = (name, user = false) => { chat.push({ name, is_user: user, is_system: false, mes: '…', horae_meta: { timestamp: { ...world.timestamp } } }); return chat.length - 1; };
 const handlers = {};
-const st = { ext: { brain: { auto: false } }, md: {}, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [], faces: [], rel: {}, story: null, fill: [] };
+const st = { ext: { brain: { auto: false } }, md: { brain: { circle: [] } }, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [], faces: [], rel: {}, story: null, fill: [], pins: {} };
 
 const api = {
     ctx: () => ({ name1: 'Хеди Барлоу', extensionSettings: st.ext, chatMetadata: st.md, saveSettingsDebounced() {}, saveMetadataDebounced() {}, eventSource: { on() {} }, eventTypes: { CHAT_CHANGED: 'chat' } }),
@@ -53,6 +53,7 @@ const api = {
         rel: (a, b) => st.rel[`${first(a)}>${first(b)}`] || { closeness: 90 },
     },
     story: { ready: () => !!st.story, felt: (who, w = 2) => (st.story?.felt || []).filter(f => f.w >= w) },
+    relPin: (a, b, v) => { const k = `${first(a)}>${first(b)}`; if (st.pins[k]) return false; st.pins[k] = v; return true; },
     askFillJson: async (messages, tokens, o, opts) => { st.fill.push({ messages, tokens, opts }); return api.askJson(); },
     lore: { about: async () => 'Лор о нём.', card: () => 'Карточка.', core: () => '• говорит коротко', key: (w) => String(w).trim(), coreAdd: (who, line) => { st.core.push([who, line]); return true; } },
     shelf: { tracker: (t) => { st.shelf.tracker = t; return true; }, mind: (f) => { st.shelf.mind = f; }, recs: (f) => { st.shelf.recs = f; }, open() {} },
@@ -627,7 +628,7 @@ test('0.5: «К кому как» — умные статы пары в лист
     await fresh(3600);
     const html = st.shelf.tracker.html();
     assert.match(html, /К кому как/);
-    assert.match(html, /любовь · под замком/);
+    assert.match(html, /космическая/);
     assert.match(html, /Прощает/); assert.match(html, /Ревность наготове/);
     const d = brain.view(B).dear;
     assert.equal(d.to, 'Хеди Барлоу'); assert.equal(d.L, 1);
@@ -672,7 +673,7 @@ test('0.5: гавань — рядом со своим человеком угр
 });
 
 test('0.5: от своего прилетело — неуверенный закрывается; тепло от того же человека отпускает', async () => {
-    st.rel['баки>хеди'] = { ...LOVE };
+    st.rel['баки>хеди'] = { ...LOVE, pin: {} };      // любит, но не «космически»: замка нет
     await fresh(4100);
     next([{ who: 'Баки', blow: 3, why: 'увидел запись своих убийств' }]);
     next([{ who: 'Баки', blow: 2, why: 'ещё одна' }]);
@@ -795,4 +796,87 @@ test('0.6: заражение зависит от того, что между н
     assert.ok(haven < plain && plain < sour, `в ладу ${haven} < обычно ${plain} < накопилось ${sour}`);
     delete st.rel['наташа>баки'];
     world.scene.characters_present = ['Баки Барнс', 'Хеди Барлоу'];
+});
+
+// ───── 0.7: космическая привязанность, обида, отклик на сильное ─────
+
+test('0.7: «свои» — круг заполняется сам, в Life им запираются любовь и близость', async () => {
+    delete st.md.brain.circle;
+    st.pins = {};
+    await fresh(6000);
+    assert.match(st.shelf.tracker.html(), /Свои[\s\S]*Хеди, Баки, Наташа, Тони, Елена/);
+    assert.deepEqual(st.md.brain.circle, ['Хеди', 'Баки', 'Наташа', 'Тони', 'Елена']);
+    change({ bin: 'circle' }, 'Хеди\nБаки', { tagName: 'TEXTAREA' });
+    assert.deepEqual(st.md.brain.circle, ['Хеди', 'Баки']);
+    assert.deepEqual(Object.keys(st.pins).sort(), ['баки>хеди', 'хеди>баки']);
+    assert.deepEqual(st.pins['баки>хеди'], { love: 100, closeness: 100 });
+    assert.equal(brain.view(B).dear.cosmic, true, 'и без единой шкалы в Life');
+    assert.match(st.shelf.tracker.html(), /космическая/);
+});
+
+test('0.7: предательство своего — больно, сказано в лицо или взято на себя, но ничего не меняет', async () => {
+    await fresh(6100);
+    next([{ who: 'Баки', by: 'Хеди', wrong: 3, why: 'она выбросила ключи, чтобы заставить его' }]);
+    const e = lastLog();
+    assert.ok(e.tags.includes('forgive'));
+    assert.ok(Math.abs(e.d.val) >= 25, `больно по-настоящему: ${e.d.val}`);
+    assert.equal(live().hurtBy.kind, 'stay');
+    assert.equal(live().grudge?.['Хеди Барлоу'], undefined, 'обиды на своего нет');
+    assert.ok(brain.view(B).combo.includes('stay'));
+    assert.match(mod.prompt('normal'), /ничего не меняет|никуда не уходит/);
+    const html = st.shelf.tracker.html();
+    assert.match(html, /больно, но ничего не меняет/);
+    assert.match(html, /для тебя сделает всё то же/);
+});
+
+test('0.7: другу предательство не прощают — остаётся обида, пока тот не сделает шаг', async () => {
+    const N = 'Наташа Романофф';
+    st.rel['баки>наташа'] = { trust: 85, closeness: 85 };
+    await fresh(6200);
+    next([{ who: 'Баки', by: 'Наташа', wrong: 3, why: 'сдала его местоположение Россу' }]);
+    assert.ok(lastLog().tags.includes('grudge'));
+    assert.equal(live().grudge[N], 100);
+    assert.ok(brain.view(B).combo.includes('grudge'));
+    assert.match(mod.prompt('normal'), /держит обиду \(Наташа\)/);
+    assert.match(st.shelf.tracker.html(), /обида \(Наташа\): 100/);
+    // пока обида держится, её тепло не греет, а колкость не размывается
+    hour(6201); next([{ who: 'Баки', by: 'Наташа', blow: 1, why: 'пошутила про это' }]);
+    assert.ok(lastLog().tags.includes('cold'));
+    hour(6202); next([{ who: 'Баки', by: 'Наташа', open: 3, why: 'рассказала, зачем это сделала' }]);
+    assert.ok(live().grudge[N] < 60);
+    hour(6202 + 24 * 14); next();
+    assert.equal(live().grudge?.[N], undefined, 'за две недели сошла');
+    delete st.rel['баки>наташа'];
+});
+
+test('0.7: отклик на сильное — реакция, развилка, решение; потом пропадает', async () => {
+    await fresh(6700);
+    next([{ who: 'Баки', blow: 3, why: 'при всех назвали убийцей' }]);
+    assert.match(mod.prompt('normal'), /сначала тело и чувство, потом жест или движение и только потом слова/);
+    assert.equal(brain.view(B).seq, 0);
+    next();
+    assert.match(mod.prompt('normal'), /развилка: хорошего выхода нет/);
+    next();
+    assert.match(mod.prompt('normal'), /сам выбирает, что делать дальше/);
+    next();
+    assert.ok(!/после сильного|только что случилось сильное/.test(mod.prompt('normal')));
+    // хорошее сильное отклик не открывает; выключатель работает
+    await fresh(6800);
+    next([{ who: 'Баки', warm: 3, why: 'она сказала да' }]);
+    assert.equal(live().seq ?? null, null);
+    change({ bin: 'm', k: 'seq' }, '', { checked: false });
+    next([{ who: 'Баки', blow: 3, why: 'снова' }]);
+    assert.ok(!/только что случилось сильное/.test(mod.prompt('normal')));
+    change({ bin: 'm', k: 'seq' }, '', { checked: true });
+});
+
+test('0.7: тёмная сторона — за своего на что угодно', async () => {
+    await fresh(6900);
+    st.stones = { who: 'Хеди Барлоу', mode: 'attack' };
+    next();
+    assert.ok(brain.view(B).combo.includes('reckless'));
+    assert.match(mod.prompt('normal'), /нарушит собственные правила/);
+    assert.match(st.shelf.tracker.html(), /опаснее всего для самого себя/);
+    st.stones = null;
+    st.md.brain.circle = [];
 });

@@ -4,11 +4,13 @@ import assert from 'node:assert/strict';
 import * as P from '../core/psyche.js';
 import * as D from '../core/drives.js';
 import { tie, pairStats, lens, haven, afterHurt, jealMul } from '../core/bonds.js';
+import * as bonds from '../core/bonds.js';
 
 const T = (over = {}) => P.normTemper({ ...P.defaultTemper(), ...over });
 const mk = (t = T()) => D.healDrives(P.fresh(t));
 const LOVE = { trust: 90, closeness: 100, love: 100, desire: 80, jealousy: 10, tension: 10, guilt: 5, pin: { love: 100, closeness: 100 } };
 const FRIEND = { trust: 80, closeness: 90, love: 0, tension: 10 };
+const LOVED = { ...LOVE, pin: {} };      // любит так же сильно, но не «космически»: замка нет
 const STRANGER = { trust: 50, closeness: 50, love: 0 };
 const E0 = { val: 5, aro: 0, ctl: 10, wor: 5 };
 
@@ -27,7 +29,7 @@ test('умные статы пары: прощает и гавань — от л
     assert.ok(calm.fuse <= 45, `уверенный в себе ревнует слабо: ${calm.fuse}`);
     const shaky = pairStats(t, { E: { ...E0, wor: -60 }, dr: { bond: 20 }, bel: 1 });
     assert.ok(shaky.fuse >= 80 && shaky.dread >= 80, `неуверенный: ${shaky.fuse} / ${shaky.dread}`);
-    const sour = pairStats(tie({ ...LOVE, tension: 95 }), { E: E0, dr: { bond: 70 } });
+    const sour = pairStats(tie({ ...LOVED, tension: 95 }), { E: E0, dr: { bond: 70 } });
     assert.equal(sour.blur, 0); assert.equal(sour.haven, 0);
     assert.deepEqual(pairStats(null), { blur: 0, haven: 0, fuse: 0, dread: 0 });
 });
@@ -38,7 +40,7 @@ test('линза: мелкое плохое от любимого размыва
     assert.ok(soft.kmul.blow <= 0.65 && soft.kmood.blow <= 0.5, JSON.stringify(soft));
     assert.ok(soft.tags.includes('blur'));
     const hard = lens({ blow: 3 }, t, st);
-    assert.ok(hard.kmul.blow === undefined && hard.kmood.blow === undefined && hard.tags.includes('deep'), 'сильное любовь не размывает и не усиливает');
+    assert.ok(hard.kmul.blow === undefined && hard.kmood.blow === 0.45 && hard.tags.includes('forgive'), 'сильное от своего: боль в полную силу, но обидой не оседает');
     const gone = lens({ loss: 2 }, t, st);
     assert.equal(gone.kmul.loss, 1.2); assert.equal(gone.kmood.loss, 1.3); assert.ok(gone.tags.includes('deep'));
     assert.equal(lens({ loss: 3 }, t, st).kmul.loss, undefined);
@@ -49,7 +51,7 @@ test('линза: мелкое плохое от любимого размыва
 });
 
 test('линза: накопилось — любовь больше не размывает, и мелочь читается уколом; от чужого добра не ждал — цепляет', () => {
-    const t = tie({ ...LOVE, tension: 90 }), st = pairStats(t, { E: E0 });
+    const t = tie({ ...LOVED, tension: 90 }), st = pairStats(t, { E: E0 });
     const x = lens({ blow: 1, warm: 2 }, t, st);
     assert.ok(x.kmul.blow > 1 && x.tags.includes('sour') && !x.tags.includes('blur'));
     assert.ok((x.kmul.warm || 1) <= 1.05, 'и тепло сейчас не греет сильнее');
@@ -100,7 +102,7 @@ test('ревность: с любовью и неуверенностью бер
 });
 
 test('гавань и «после того, как прилетело»', () => {
-    const ti = tie(LOVE), st = pairStats(ti, { E: E0, dr: { bond: 70 } });
+    const ti = tie(LOVED), st = pairStats(ti, { E: E0, dr: { bond: 70 } });
     const h = haven(st);
     assert.ok(h.on && h.threat < 0.85 && h.ease > 0.8);
     assert.equal(haven(st, true).on, false, 'сам за него боится — близость не успокаивает');
@@ -234,4 +236,65 @@ test('ущемление сильнее нехватки: придавленна
     // держит лицо — близость до него не доходит
     const s3 = mk(t); const b0 = s3.dr.bond; D.driveHit(s3, { held: 2 }, t);
     assert.ok(s3.dr.bond < b0);
+});
+
+// ───── 0.7: космическая привязанность, обида, «остаётся рядом» ─────
+
+test('космическая привязанность: запертая любовь или круг «своих»; накопившееся её не перекрашивает', () => {
+    assert.equal(tie(LOVE).cosmic, true, 'любовь под замком на сто');
+    assert.equal(tie({ ...LOVE, pin: {} }).cosmic, false, 'без замка — обычная любовь');
+    const c = tie(null, { cosmic: true });
+    assert.equal(c.L, 1); assert.equal(c.cosmic, true); assert.equal(c.fixed, true);
+    const sour = tie({ tension: 100 }, { cosmic: true });
+    assert.ok(sour.sour <= 0.25);
+    assert.ok(pairStats(sour, { E: E0 }).blur >= 55, 'и в ссоре мелкое размывается');
+});
+
+test('предательство: своему — больно, но простят и останутся; другу — обида', () => {
+    const t = T();
+    const mine = tie(LOVE), friend = tie(FRIEND);
+    const a = mk(t), b = mk(t), c = mk(t);
+    const La = lens({ wrong: 3 }, mine, pairStats(mine, { E: E0 })), Lb = lens({ wrong: 3 }, friend, pairStats(friend, { E: E0 }));
+    assert.ok(La.tags.includes('forgive') && !La.tags.includes('grudge'));
+    assert.ok(Lb.tags.includes('grudge') && !Lb.tags.includes('forgive'));
+    const da = P.hit(a, { wrong: 3 }, t, { kmul: La.kmul, kmood: La.kmood }), db = P.hit(b, { wrong: 3 }, t, { kmul: Lb.kmul, kmood: Lb.kmood }), dc = P.hit(c, { wrong: 3 }, t);
+    assert.equal(da.val, dc.val, 'от своего — так же больно, как от любого');
+    assert.equal(db.val, dc.val, 'сильное линза не усиливает — поручень на месте');
+    assert.ok(Math.abs(a.mood.val) < Math.abs(b.mood.val) * 0.55, 'но в настроении не оседает');
+    assert.equal(afterHurt(mine, pairStats(mine, { E: { ...E0, wor: -70 }, bel: 1 })), 'stay', 'даже неуверенный не закрывается от своего');
+    assert.equal(afterHurt(friend, pairStats(friend, { E: E0 })), 'mend');
+});
+
+test('остаётся рядом — по-своему: берёт на себя, говорит в лицо или молча делает', () => {
+    const { stayStyle } = bonds;
+    assert.equal(stayStyle({ val: -30, aro: 10, ctl: 20, wor: -40 }, { id: 'shame', step: 2 }), 'inward');
+    assert.equal(stayStyle({ val: -40, aro: 30, ctl: 20, wor: 0 }, { id: 'anger', step: 2 }), 'fierce');
+    assert.equal(stayStyle({ val: -5, aro: 0, ctl: 5, wor: 0 }, { id: '', step: 0 }), 'quiet');
+    const s = mk();
+    const txt = (stay) => D.combos({ s, dom: { id: '', step: 0 }, hurt: 'stay', stay })[0];
+    assert.equal(txt('fierce').id, 'stay');
+    assert.match(txt('fierce').t, /говорит в лицо[\s\S]*ничего не меняет/);
+    assert.match(txt('inward').t, /берёт на себя/);
+    assert.match(txt('quiet').t, /ни слова упрёка/);
+});
+
+test('обида: пока держится — любовь не размывает и тепло не греет; отходчивый отпускает быстрее', () => {
+    const { grudgeDecay } = bonds;
+    const friend = tie(FRIEND), st = pairStats(friend, { E: E0, dr: { bond: 70 } });
+    const warm = lens({ warm: 2, blow: 1 }, friend, st), cold = lens({ warm: 2, blow: 1 }, friend, st, { grudge: 80 });
+    assert.ok(warm.kmul.warm > 1 && warm.kmul.blow < 1);
+    assert.equal(cold.kmul.warm, 0.8); assert.equal(cold.kmul.blow, 1.1); assert.ok(cold.tags.includes('cold'));
+    assert.ok(!lens({ blow: 1 }, tie(LOVE), pairStats(tie(LOVE), { E: E0 }), { grudge: 80 }).tags.includes('cold'), 'на своего обиду не держат');
+    assert.ok(Math.abs(grudgeDecay(100, 72, 1) - 50) < 1);
+    assert.ok(grudgeDecay(100, 72, 2) < grudgeDecay(100, 72, 0.6));
+    assert.ok(D.combos({ s: mk(), dom: { id: '', step: 0 }, grudge: 'Сэм' }).some(c => c.id === 'grudge' && /Сэм/.test(c.t)));
+});
+
+test('тёмная сторона: за своего — на что угодно; в разлуке не отпускает', () => {
+    const s = mk();
+    assert.equal(D.combos({ s, dom: { id: 'fear', step: 2 }, worry: true, cosmic: true })[0].id, 'reckless');
+    assert.ok(!D.combos({ s, dom: { id: 'fear', step: 2 }, worry: true }).some(c => c.id === 'reckless'));
+    s.dr.bond = 10;
+    assert.equal(D.combos({ s, dom: { id: '', step: 0 }, apart: true, cosmic: true })[0].id, 'wait');
+    assert.notEqual(D.combos({ s, dom: { id: '', step: 0 }, apart: true })[0].id, 'wait');
 });
