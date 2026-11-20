@@ -80,7 +80,8 @@ test('Летописцу уходит правило и строка «Псих�
     assert.equal(c.key, '"psy": []');
     assert.match(c.rule, /blow/);
     assert.match(c.input, /Баки Барнс — ровно/);
-    assert.ok(!/Хеди|Рассказчик/.test(c.input));
+    assert.ok(!/Хеди Барлоу — |Рассказчик/.test(c.input), 'психику персонажа игрока и рассказчика мозг не ведёт');
+    assert.match(c.input, /персонаж игрока: Хеди \(только выпитое\)/);
     assert.ok(c.tokens > 100);
 });
 
@@ -1118,4 +1119,98 @@ test('0.8: известным — способ по умолчанию; сбор
     assert.equal(st.asked, asked, 'второй раз не спрашивает');
     st.ext.brain.auto = false;
     st.depth = null;
+});
+
+// ───────────── 0.8.2: тихая минута; выпитое у персонажа игрока ─────────────
+
+test('0.8.2: подначки — не всегда: в тихую минуту у пары тишина, в игривую — подколки, в обычную модели не диктуем', async () => {
+    delete st.md.brain.circle;
+    delete st.md.brain.pairs;
+    st.pins = {};
+    setStyle('guard');
+    // день, ровно: ядро тропа и обычная манера быть рядом
+    await fresh(9600);
+    let rows = three();
+    assert.equal(count(rows, /с Хеди — равные/), 1, rows.join('\n'));
+    assert.equal(count(rows, /сейчас —/), 0);
+    assert.equal(count(rows, /привязанность выражает охраной и делом/), 1);
+    // поздний вечер: тишина вдвоём, без единой подколки
+    await fresh(9613);
+    rows = three();
+    assert.equal(count(rows, /с Хеди — равные[\s\S]*сейчас — им хватает тишины вдвоём[\s\S]*нежность без единой подначки/), 1, rows.join('\n'));
+    assert.equal(count(rows, /пост сдаёт: плечи опускаются/), 1);
+    assert.equal(count(rows, /на риск|охраной и делом/), 0);
+    // нежность днём — тоже тихая минута
+    await fresh(9624);
+    next([{ who: 'Баки', by: 'Хеди', warm: 3, why: 'сказала, что с ним она дома' }]);
+    assert.equal(brain.view(B).emo.id, 'tender');
+    rows = three();
+    assert.equal(count(rows, /сейчас — им хватает тишины вдвоём/), 1, rows.join('\n'));
+    // азарт — тогда и подначки
+    await fresh(9648);
+    next([{ who: 'Баки', by: 'Хеди', fun: 3, why: 'затеяла гонку по пустой трассе' }]);
+    assert.equal(brain.view(B).emo.id, 'playful');
+    rows = three();
+    assert.equal(count(rows, /сейчас — подначивают друг друга на риск/), 1, rows.join('\n'));
+    setStyle('');
+    st.md.brain.circle = [];
+    st.md.brain.pairs = [];
+});
+
+test('0.8.2: персонаж игрока — мозг считает только выпитое; ботам — что видно, игроку — подсказка', async () => {
+    st.md.brain.circle = ['Хеди', 'Баки'];
+    st.md.brain.pairs = [];
+    delete st.md.brain.me;
+    await fresh(9700);
+    assert.deepEqual(brain.me(), { drunk: 0, hung: 0 });
+    assert.ok(!/персонаж игрока/.test(mod.prompt('normal')));
+    const i = next([{ who: 'Хеди', drink: 3 }]);
+    assert.deepEqual(brain.me(), { drunk: 2, hung: 0 });
+    assert.equal(st.md.brain.who['Хеди Барлоу'], undefined, 'психики у персонажа игрока нет');
+    const p = mod.prompt('normal');
+    assert.match(p, /\[Хеди, персонаж игрока, — под градусом; со стороны видно: движения шире[\s\S]*решает игрок, за игрока не пиши/);
+    assert.match(p, /Хеди под градусом — присматривает по-своему: /, 'близкий присматривает своей кассетой');
+    const html = st.shelf.tracker.html();
+    assert.match(html, /🥃 Хеди: под градусом/);
+    assert.match(html, /Подсказка\.[\s\S]*выветрится примерно за 6 ч истории; наутро — похмелье, на полдня/);
+    assert.match(html, /Как Хеди себя ведёт — решаешь ты/);
+    // свайп того же ответа выпитое не удваивает
+    const bac = st.md.brain.me.bac;
+    mod.afterPost(i, { psy: [{ who: 'Хеди', drink: 3 }] }, chat[i]);
+    assert.equal(st.md.brain.me.bac, bac);
+    // тот же бокал в следующем посте — не новая порция целиком
+    next([{ who: 'Хеди', drink: 1 }]);
+    assert.ok(st.md.brain.me.bac - bac < 8, `${st.md.brain.me.bac} − ${bac}`);
+    // её нет в сцене — строки нет
+    world.scene.characters_present = ['Баки Барнс', 'Наташа Романофф'];
+    assert.ok(!/персонаж игрока/.test(mod.prompt('normal')));
+    world.scene.characters_present = ['Баки Барнс', 'Хеди Барлоу'];
+    // утро
+    hour(9709);
+    assert.deepEqual(brain.me(), { drunk: 0, hung: 1 });
+    const m = mod.prompt('normal');
+    assert.match(m, /\[Хеди, персонаж игрока, — с похмелья; со стороны видно: бледность/);
+    assert.match(m, /Хеди с похмелья — присматривает по-своему: /);
+    assert.match(st.shelf.tracker.html(), /🤕 Хеди: с похмелья[\s\S]*Похмелье ещё ~\d+ ч истории/);
+    await click({ bact: 'me-sober' });
+    assert.deepEqual(brain.me(), { drunk: 0, hung: 0 });
+    assert.ok(!/персонаж игрока|присматривает по-своему/.test(mod.prompt('normal')));
+    await click({ bact: 'me-drink' });
+    assert.equal(brain.me().drunk, 1);
+    await click({ bact: 'me-sober' });
+    // «как берёт» — её ползунок в настройках мозга
+    change({ bin: 'me', k: 'booze' }, '4');
+    next([{ who: 'Хеди', drink: 3 }]);
+    assert.equal(brain.me().drunk, 0);
+    change({ bin: 'me', k: 'booze' }, '1');
+    await click({ bact: 'me-sober' });
+    // выключатель «Алкоголь» гасит и это
+    next([{ who: 'Хеди', drink: 3 }]);
+    assert.equal(brain.me().drunk, 2);
+    mechSet('booze', false);
+    assert.deepEqual(brain.me(), { drunk: 0, hung: 0 });
+    assert.ok(!/персонаж игрока/.test(mod.prompt('normal')));
+    mechSet('booze', true);
+    delete st.md.brain.me;
+    st.md.brain.circle = [];
 });

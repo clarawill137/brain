@@ -6,9 +6,9 @@ import { STYLES, STYLE_IDS, styleId, styleLine, TROPES, TROPE_IDS, tropeLine, tr
 import { tie, pairStats, lens, afterHurt } from '../core/bonds.js';
 import { combos } from '../core/drives.js';
 import { hints } from '../core/hints.js';
-import { STAGE_AT, stageOf, tolOf, drink, sober, boozeNow, DRUNK, HUNG } from '../core/booze.js';
+import { STAGE_AT, stageOf, tolOf, drink, sober, boozeNow, DRUNK, HUNG, SEEN, SEEN_HUNG, playerTips } from '../core/booze.js';
 
-const POS = ['near', 'threat', 'apart', 'hurt', 'rival'];
+const POS = ['near', 'quiet', 'threat', 'apart', 'hurt', 'rival'];
 const LOVED = tie({ love: 100, closeness: 100, trust: 80 });
 const COSMIC = tie({}, { cosmic: true });
 
@@ -87,16 +87,45 @@ test('комбинации говорят его словами: ревност�
 });
 
 test('тропы: строка пары, тёмная сторона — только под давлением, романтика — три вида', () => {
-    for (const id of TROPE_IDS) assert.ok(TROPES[id].name && TROPES[id].dyn.length > 30 && TROPES[id].dark.length > 20, id);
+    for (const id of TROPE_IDS) assert.ok(TROPES[id].name && TROPES[id].dyn.length > 30 && TROPES[id].dark.length > 20 && TROPES[id].soft.length > 15, id);
     const calm = tropeLine({ id: 'hybrid', rom: 'yes' }, 'Хеди');
     assert.match(calm, /^с Хеди — равные/);
-    assert.match(calm, /это любовь/);
-    assert.ok(!/под давлением/.test(calm));
+    assert.match(calm, /это любовь, и оба это знают/);
+    assert.ok(!/под давлением|сейчас —|поднач/.test(calm), 'в обычную минуту — только ядро: шутить или молчать, модели не диктуем');
     assert.match(tropeLine({ id: 'hybrid', rom: 'hint' }, 'Наташа', true), /нет названия[\s\S]*вслух этого нет[\s\S]*под давлением вылезает другое[\s\S]*не умеет другого отпустить[\s\S]*тесно всем остальным/);
-    assert.match(tropeLine({ id: 'sisters', rom: 'no' }, 'Елена', true), /подначки вдруг смолкают — это и есть сигнал тревоги/);
+    assert.match(tropeLine({ id: 'sisters', rom: 'no' }, 'Елена', true), /подначки пропадают первыми — не от покоя, а от напряжения/);
     assert.ok(!/это любовь|вслух этого/.test(tropeLine({ id: 'kin', rom: 'no' }, 'Тони')));
     assert.equal(tropeLine({ id: 'нет такого' }, 'Хеди'), '');
     assert.equal(tropeLine(null, 'Хеди'), '');
+});
+
+test('тропы: подначки — в игривую минуту, в тихую — тишина; любовь бывает и без единой подколки', () => {
+    const play = tropeLine({ id: 'hybrid', rom: 'yes' }, 'Хеди', false, 'play');
+    assert.match(play, /сейчас — подначивают друг друга на риск[\s\S]*это любовь, и оба это знают/);
+    const soft = tropeLine({ id: 'hybrid', rom: 'yes' }, 'Хеди', false, 'soft');
+    assert.match(soft, /сейчас — им хватает тишины вдвоём[\s\S]*это любовь, и сейчас она тихая: нежность без единой подначки/);
+    assert.ok(!/на риск|оба это знают/.test(soft));
+    const hint = tropeLine({ id: 'hybrid', rom: 'hint' }, 'Наташа', false, 'soft');
+    assert.match(hint, /рука, задержавшаяся дольше нужного/);
+    assert.ok(!/сразу шутка/.test(hint), 'в тихую минуту несказанное не прячут за шуткой');
+    assert.match(tropeLine({ id: 'sisters', rom: 'no' }, 'Елена', false, 'soft'), /молчание не неловкое/);
+    assert.match(tropeLine({ id: 'sisters', rom: 'no' }, 'Елена', false, 'play'), /шутят по-чёрному/);
+    // под давлением минута не важна: показывается тёмная сторона
+    const dark = tropeLine({ id: 'hybrid', rom: 'yes' }, 'Хеди', true, 'soft');
+    assert.ok(!/сейчас —|она тихая/.test(dark));
+    assert.match(dark, /под давлением вылезает другое/);
+    // у перемирия игривой минуты нет вовсе
+    assert.ok(!/сейчас —/.test(tropeLine({ id: 'truce', rom: 'no' }, 'Тони', false, 'play')));
+});
+
+test('способы: в тихую минуту у каждого своя тишина; «редкий покой» говорит его словами', () => {
+    assert.match(styleLine('guard', 'quiet'), /пост сдаёт/);
+    assert.match(styleLine('test', 'quiet'), /не колет вовсе/);
+    assert.match(styleLine('armor', 'quiet'), /броня снимается молча: ни шуток, ни дела/);
+    const s = { ...P.fresh(), strain: 5, dr: { bond: 90, safe: 95, free: 60, need: 60, quiet: 60, novel: 60 } };
+    const dom = { id: '', step: 0 };
+    assert.match(combos({ s, dom }).find(c => c.id === 'rest').t, /редкий покой/);
+    assert.match(combos({ s, dom, style: 'test' }).find(c => c.id === 'rest').t, /не колет вовсе/);
 });
 
 test('троп меняет, что у этих двоих задевает: только некрупное', () => {
@@ -252,4 +281,23 @@ test('подсказки: пьян, с похмелья, стержень', () =
     const sp = hints({ ...base, spine: { need: 'поверить, что его можно любить', fear: 'снова стать оружием' } });
     assert.match(sp.help.join('|'), /на деле нужно: поверить/);
     assert.match(sp.hurt.join('|'), /главный страх: снова стать оружием/);
+});
+
+test('персонаж игрока: что видно со стороны и подсказки — когда выветрится и чего ждать наутро', () => {
+    for (const k of [1, 2, 3, 4]) assert.ok(SEEN[k].length > 20);
+    for (const k of [1, 2]) assert.ok(SEEN_HUNG[k].length > 20);
+    const s = {};
+    drink(s, 3);
+    const tips = playerTips(s, 1).join('|');
+    assert.match(tips, /под градусом: что на первом плане/);
+    assert.match(tips, /выветрится примерно за 6 ч истории/);
+    assert.match(tips, /наутро — похмелье, на полдня/);
+    drink(s, 3);
+    const hard = playerTips(s, 1).join('|');
+    assert.match(hard, /наутро — тяжёлое похмелье/);
+    assert.match(hard, /помниться кусками/);
+    assert.match(playerTips({ bac: 20 }, 1).join('|'), /похмелья с такого не будет/);
+    assert.match(playerTips({ bac: 50, bacPeak: 50 }, 4).join('|'), /похмелья не будет/);
+    assert.match(playerTips({ bac: 0, hung: { lvl: 1, left: 7.4 } }, 1).join('|'), /похмелье ещё ~7 ч истории/);
+    assert.deepEqual(playerTips({ bac: 0 }, 1), []);
 });

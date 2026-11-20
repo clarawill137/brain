@@ -11,9 +11,9 @@ import { DRIVE_NAME, DRIVE_ICON, BAND_NAME, freshDrives, healDrives, driveHit, d
 import { hints } from './core/hints.js';
 import { SOFT, tie, pairStats, lens, haven, afterHurt, stayStyle, grudgeDecay } from './core/bonds.js';
 import { STYLES, STYLE_IDS, styleId, styleLine, TROPES, TROPE_IDS, ROM_NAME, tropeLine, tropeMul, rejectOf, SPINE_KEYS, SPINE_NAME, hasSpine, spineLine } from './core/attach.js';
-import { STAGE_NAME, stageOf, tolOf, drink, sober, boozeNow, DRUNK, HUNG } from './core/booze.js';
+import { STAGE_NAME, stageOf, tolOf, drink, sober, boozeNow, DRUNK, HUNG, SEEN, SEEN_HUNG, playerTips } from './core/booze.js';
 
-const VERSION = '0.8.1';
+const VERSION = '0.8.2';
 const ID = 'brain';
 const TITLE = '🧠 Мозг';
 const NARR = /рассказчик|narrator|мастер|game ?master|(^|[^a-z])gm([^a-z]|$)|мнемозина/i;
@@ -148,6 +148,59 @@ function setPair(a, b, patch) {
     if (!TROPES[p.id]) list.splice(list.indexOf(p), 1);
     saveM();
 }
+// ───────────── персонаж игрока: мозг его не ведёт — только считает выпитое ─────────────
+const meTol = () => P.clamp(cfg().meBooze ?? 1, 0.4, 6);
+function meLive() {
+    const m = M();
+    if (!m.me || typeof m.me !== 'object') m.me = { bac: 0, bacPeak: 0, hung: null, blank: false, drankAt: null, at: null };
+    return m.me;
+}
+/** Что с персонажем игрока прямо сейчас: { s, stage, hung, blank } или null — ни хмеля, ни похмелья. */
+function meNow() {
+    if (!on() || !mech('booze') || !M().me) return null;
+    const s = clone(M().me);
+    if (s.at) sober(s, hoursBetween(s.at, nowStamp()), meTol());
+    const stage = stageOf(s.bac);
+    const hung = s.hung ? Math.round(P.clamp(s.hung.lvl, 1, 2)) : 0;
+    return stage || hung ? { s, stage, hung, blank: !!s.blank } : null;
+}
+/** Пост прошёл: время трезвит, Летописец называет, сколько выпито. */
+function mePost(i, rows, n) {
+    if (!mech('booze')) return;
+    const U = user();
+    const dn = U ? Math.max(0, ...rows.filter(r => r && A.sameName(r.who, U)).map(r => Math.round(P.clamp(r.drink, 0, 3)))) : 0;
+    if (!dn && !M().me) return;
+    const s = meLive();
+    if (s.at) sober(s, hoursBetween(s.at, n), meTol());
+    s.at = n;
+    if (dn) {
+        const again = s.drankAt != null && i - s.drankAt <= 2;
+        drink(s, dn, meTol(), again ? [1, 0.4, 0.7, 1][dn] : 1);
+        s.drankAt = i;
+    }
+}
+/** Руками: налить или протрезвить. Снимок свайпа обновляем, чтобы правка не откатилась. */
+function meHand(act) {
+    const s = meLive();
+    const n = nowStamp();
+    if (s.at) sober(s, hoursBetween(s.at, n), meTol());
+    s.at = n;
+    if (act === 'drink') drink(s, 2, meTol());
+    else Object.assign(s, { bac: 0, bacPeak: 0, hung: null, blank: false, drankAt: null });
+    const m = M();
+    if (m.snap) m.snap.me = JSON.stringify(m.me ?? null);
+    saveM();
+    safe(() => A.updatePrompt());
+}
+/** Строка модели: только то, что видно со стороны. Что персонаж игрока делает и чувствует — решает игрок. */
+function meLine(here) {
+    const me = meNow();
+    const U = short(user());
+    if (!me || !U || !inScene(user(), here)) return '';
+    const what = me.stage ? `${STAGE_NAME[me.stage]}; со стороны видно: ${SEEN[me.stage]}` : `${me.hung === 2 ? 'тяжёлое похмелье' : 'с похмелья'}; со стороны видно: ${SEEN_HUNG[me.hung]}`;
+    return `[${U}, персонаж игрока, — ${what} (считает Life по выпитому в истории). Что ${U} делает, говорит и чувствует — решает игрок, за игрока не пиши; остальные это замечают и откликаются каждый по-своему.]`;
+}
+
 /** Известным персонажам — способ привязываться по умолчанию (один раз; дальше — как поправишь). */
 function seedTemper(who) {
     const k = keyOf(who);
@@ -474,7 +527,7 @@ const initCtx = (who, v) => ({ steps: num(safe(() => A.senses?.steps?.(who, user
 
 const RULE = `
 psy — что этот пост (и пост игрока перед ним) сделал с ВНУТРЕННИМ состоянием персонажей из строки «Психика»: [{"who":"имя","blow":2,"held":1,"why":"из-за чего, 3–10 слов"}]. Только те, с кем что-то случилось; ни с кем — []. В строке — только ненулевые шкалы, каждая от 1 до 3 (1 — слегка, 2 — заметно, 3 — по-настоящему сильно; 3 ставь редко): warm — ему дали тепло, поддержку, нежность, признание; fun — смех, игра, флирт, азарт; win — справился, защитил, его послушали, получилось; calm — отдых, покой, безопасность, отпустило; threat — угроза ему или тем, кто ему дорог, опасность; blow — удар по самооценке: унизили, обесценили, пристыдили, напомнили о худшем в нём, сам себя винит; bound — потерял контроль: решили за него, скован, беспомощен, лишён выбора; wrong — с ним обошлись несправедливо, соврали, перешли границу, задели близкого; loss — утрата, разлука, отвергли, одиночество; rival — ревность: тот, кто ему дорог, отдал тепло или внимание другому, или кто-то претендует на его место рядом; held — сдержался: проглотил, промолчал, удержал лицо, хотя внутри кипело; open — открылся: сказал вслух то, что носил в себе, показал настоящее, выплакался, признался. Оценивай то, что случилось С НИМ, а не то, как он это показал: спокойное лицо после оскорбления — это blow и held. Обычный разговор без такого — не пиши ничего. Если это пришло от конкретного человека (в том числе от персонажа игрока) — добавь "by":"его имя" (у rival в by — тот, кто ему дорог); от двоих разное — две строки на одного who.
-Если в «Психике» у человека есть «возвращает» и в посте это с ним произошло и помогло — добавь в его строку "fix":[номера]. Если есть «убеждения» и поступок или слова в посте ПО-НАСТОЯЩЕМУ поколебали одно из них (−1 слегка, −2 сильно: ему на деле показали, что это не так, и он хоть на шаг это принял) или подтвердили (1, 2) — добавь "bel":[{"id":"b…","d":-1}]; дежурный комплимент убеждение не колеблет. Если человек в ЭТОМ посте пил спиртное — добавь в его строку "drink": 1 (глоток, бокал-другой), 2 (заметно: несколько порций) или 3 (много: бутылка, залпом, на спор); строка может состоять из одного "drink".`;
+Если в «Психике» у человека есть «возвращает» и в посте это с ним произошло и помогло — добавь в его строку "fix":[номера]. Если есть «убеждения» и поступок или слова в посте ПО-НАСТОЯЩЕМУ поколебали одно из них (−1 слегка, −2 сильно: ему на деле показали, что это не так, и он хоть на шаг это принял) или подтвердили (1, 2) — добавь "bel":[{"id":"b…","d":-1}]; дежурный комплимент убеждение не колеблет. Если человек в ЭТОМ посте пил спиртное — добавь в его строку "drink": 1 (глоток, бокал-другой), 2 (заметно: несколько порций) или 3 (много: бутылка, залпом, на спор); строка может состоять из одного "drink". То же — для персонажа игрока (его имя дано в «Психике»): если спиртное пил он, в этом или в предыдущем посте, добавь отдельную строку {"who":"его имя","drink":1}; других полей в ней не ставь.`;
 
 function chron() {
     if (!on()) return null;
@@ -489,7 +542,7 @@ function chron() {
         if (bel.length) { bits.push(`убеждения: ${bel.map(b => `[${b.id}] «${b.t}»`).join(', ')}`); extra += 25; }
         return bits.join('; ');
     });
-    return { key: '"psy": []', rule: RULE, tokens: 70 + who.length * 50 + extra, input: `Психика (оцени, что с ними случилось в этих постах): ${cur.join(' | ')}` };
+    return { key: '"psy": []', rule: RULE, tokens: 85 + who.length * 50 + extra, input: `Психика (оцени, что с ними случилось в этих постах): ${cur.join(' | ')}${mech('booze') && user() ? ` | персонаж игрока: ${short(user())} (только выпитое)` : ''}` };
 }
 
 function log(s, e) {
@@ -529,14 +582,20 @@ function afterPost(i, j, msg) {
     relCache.clear();
     // свайп того же поста — с того же места
     // (ручные правки после этого поста лежат в m.ops и накладываются заново; новый пост — они уже в снимке)
-    if (m.snap && m.snap.i === i) { try { m.who = JSON.parse(m.snap.data); } catch { /* */ } }
-    else { m.snap = { i, data: JSON.stringify(m.who) }; m.ops = []; }
+    if (m.snap && m.snap.i === i) {
+        try {
+            m.who = JSON.parse(m.snap.data);
+            // выпитое у персонажа игрока — тоже с того же места (в снимках до 0.8.2 его нет)
+            if (typeof m.snap.me === 'string') { const me = JSON.parse(m.snap.me); if (me) m.me = me; else delete m.me; }
+        } catch { /* */ }
+    } else { m.snap = { i, data: JSON.stringify(m.who), me: JSON.stringify(m.me ?? null) }; m.ops = []; }
     const ops = Array.isArray(m.ops) ? m.ops.filter(o => o.i === i) : [];
     const n = stampAt(i);
     const here = present();
     const rows = Array.isArray(j?.psy) ? j.psy : [];
     const trig = safe(() => A.senses?.trigAt?.(i) || [], []);
     const done = [];
+    safe(() => mePost(i, rows, n));
     for (const who of list()) {
         const t = temperOf(who);
         const s = stateOf(who);
@@ -803,6 +862,25 @@ function tropeWith(who, v, here = present()) {
     const hot = all.find(b => (s.hurtBy && A.sameName(s.hurtBy.to, b.to)) || (num(s.jeal) >= 25 && A.sameName(s.jealTo, b.to)));
     return hot || all[0];
 }
+/** Час истории (0…23) или -1, если Life его не знает. */
+function hourNow() {
+    const tm = String(A.worldState()?.timestamp?.story_time || '').match(/(\d{1,2})[:.](\d{2})/);
+    return tm ? +tm[1] : -1;
+}
+/**
+ * Какая сейчас минута у человека: 'soft' — тихая (нежность, редкий покой, поздний час, устал, утро после),
+ * 'play' — игривая, '' — обычная. Подначки в строке пары — только в игривую; у близких бывает и просто тишина,
+ * и это не тревога.
+ */
+function toneOf(v) {
+    const { s, dom, sig } = v;
+    if (NEG.includes(dom.id) || s.brk) return '';
+    const h = hourNow();
+    const late = h >= 23 || (h >= 0 && h < 6);
+    if (dom.id === 'tender' || v.combo.some(c => c.id === 'rest') || sig.booze?.hung || s.hang || num(sig.drain) >= 1.2 || late) return 'soft';
+    return dom.id === 'playful' ? 'play' : '';
+}
+
 /**
  * Глубина персонажа — то, что есть в нём всегда, а не случилось сейчас: как привязывается, по какому сценарию
  * живёт пара, чего добивается. В тихой сцене — по одной строке за ответ, по кругу (чтобы модель не повторяла один
@@ -818,7 +896,8 @@ function depthBits(who, v, press, choosing, hard) {
     const sp = mech('spine') && hasSpine(t.spine) ? t.spine : null;
     // «хочу» растёт из убеждения о себе: шатается — начинает видеть, что ему нужно; сломалось — может выбрать «нужно»
     const seeing = s.belBroke && lastI - s.belBroke.mes <= 40 ? 2 : t.beliefs.some(b => { const hp = P.beliefHp(s, b.id); return hp > 0 && hp <= 40; }) ? 1 : 0;
-    const trope = (dark) => (pair ? tropeLine(pair.tr, short(pair.to), dark) : '');
+    const tone = toneOf(v);
+    const trope = (dark) => (pair ? tropeLine(pair.tr, short(pair.to), dark, tone) : '');
     if (press) {
         // один блок, не оба: на развилке и когда прижало всерьёз важнее стержень, иначе — троп с его тёмной стороной
         const spine = sp && (choosing || hard) ? spineLine(sp, choosing ? 'choice' : 'press', seeing) : '';
@@ -827,7 +906,9 @@ function depthBits(who, v, press, choosing, hard) {
     }
     // тихо: одна строка по кругу — как привязан, троп, чем живёт
     const dear = sig.dear;
-    const near = style && dear && inScene(who, here) && inScene(dear.to, here) ? styleLine(style, 'near') : '';
+    // тихая минута — своя строка (без подначек и дела); если «редкий покой» уже сказан комбинацией — не повторяем
+    const calmed = v.combo.some(c => c.id === 'rest');
+    const near = style && dear && !calmed && inScene(who, here) && inScene(dear.to, here) ? (tone === 'soft' && styleLine(style, 'quiet')) || styleLine(style, 'near') : '';
     // у каждой строки свой ответ из трёх: нет её — в этот раз ничего (одно и то же каждый пост модель начинает повторять)
     const line = [near, trope(false), sp ? spineLine(sp, 'calm') : ''][lastI % 3];
     if (line) out.push(line);
@@ -857,6 +938,15 @@ function note(who) {
     if (mech('seq') && seqLive && SEQ_TEXT[num(s.seq.n)]) extra.push(SEQ_TEXT[num(s.seq.n)]);
     // пьян — это меняет всю манеру, поэтому идёт раньше остального
     if (bz?.stage) extra.push(drunkText(t, bz));
+    // персонаж игрока под градусом или с похмелья: близкий присматривает — каждый по-своему
+    const me = meNow();
+    // не каждый ответ, иначе выйдет «ты как?» через строчку: сразу после выпитого и потом раз в три ответа
+    const meTick = A.chatArr().length - 1;
+    const meDue = me && (meTick % 3 === 0 || (me.s.drankAt != null && meTick - me.s.drankAt <= 1));
+    if (meDue && (me.stage >= 2 || me.hung) && !sig.worry && inScene(user())) {
+        const b = bondTo(who, user(), s, v.E, t);
+        if (b && b.t.L >= 0.5) extra.push(`${U} ${me.stage ? 'под градусом' : 'с похмелья'} — присматривает по-своему: ${cassText(t, 'care')}`);
+    }
     const leak = P.leakOf(s, sig.loose);
     if (leak) extra.push(`${leak === 2 ? 'то, что прячет, уже почти не держится и может сорваться с языка' : 'то, что прячет, проступает сильнее обычного'}: ${cassText(t, 'leak')}`);
     // комбинации потребностей с чувством: самая сильная — сразу, вторая — если останется место
@@ -898,7 +988,7 @@ function note(who) {
 function prompt(type) {
     if (!on() || type === 'quiet' || type === 'impersonate') return '';
     const here = present();
-    return list().filter(n => inScene(n, here)).map(n => safe(() => note(n), '')).filter(Boolean).join('\n');
+    return [...list().filter(n => inScene(n, here)).map(n => safe(() => note(n), '')), safe(() => meLine(here), '')].filter(Boolean).join('\n');
 }
 
 // ───────────── что мозг отдаёт соседям Life ─────────────
@@ -1321,6 +1411,23 @@ function spineHtml(v) {
     return `${A.sec('Стержень', 'правится в темпераменте')}<div class="brn-spine">${row('goal', 'Добивается')}${row('need', 'На деле нужно')}${row('view', 'Мир видит так')}${row('fear', 'Боится')}${row('face', 'Хочет выглядеть')}</div>`;
 }
 
+/** Персонаж игрока под градусом или с похмелья: что видят боты и подсказка игроку. */
+function meHtml() {
+    if (!mech('booze')) return '';
+    const me = meNow();
+    if (!me) return '';
+    const U = esc(short(user()));
+    const bac = Math.round(num(me.s.bac));
+    const title = me.stage ? STAGE_NAME[me.stage] : me.hung === 2 ? 'тяжёлое похмелье' : 'с похмелья';
+    const seen = me.stage ? SEEN[me.stage] : SEEN_HUNG[me.hung];
+    const tips = playerTips(me.s, meTol());
+    return `<div class="brn-booze brn-me"><b>${me.stage ? '🥃' : '🤕'} ${U}: ${esc(title)}</b>
+        ${me.stage && bac ? `<i><u style="width:${bac}%"></u></i>` : ''}
+        <small>Ботам уходит только то, что видно со стороны: ${esc(seen)}. Как ${U} себя ведёт — решаешь ты.</small>
+        ${tips.length ? `<small class="tip"><b>Подсказка.</b> ${esc(cap(tips.join('; ')))}.</small>` : ''}
+        <div class="lf-chips"><button class="lf-chip" data-bact="me-drink">налить ещё</button><button class="lf-chip" data-bact="me-sober">протрезвить</button></div></div>`;
+}
+
 function cardHtml(who) {
     const v = view(who);
     const { s, t, dom, sig } = v;
@@ -1378,6 +1485,7 @@ function bodyHtml() {
     const c = cfg();
     const sw = (k, text) => `<label class="lf-switch"><input type="checkbox" data-bin="g" data-k="${k}" ${c[k] !== false ? 'checked' : ''}><span></span>${text}</label>`;
     return `${all.length > 1 ? `<div class="brn-tabs">${all.map(n => `<button class="brn-tab${A.sameName(n, sel) ? ' on' : ''}" data-bact="sel" data-who="${esc(n)}">${mine(n) ? auraHtml(n, 'sm') : A.ava(n, 'sm')}<small>${esc(short(n))}</small></button>`).join('')}</div>` : ''}
+        ${meHtml()}
         ${cardHtml(sel)}
         <details class="lf-more brn-more" ${det('g')}><summary>Настройки мозга</summary>
             ${sw('on', 'Мозг включён')}
@@ -1385,6 +1493,7 @@ function bodyHtml() {
             ${sw('brk', 'Срывы: когда накопилось и держать нечем')}
             ${sw('aura', 'Ауры в Сцене')}
             ${sw('auto', 'Сам собирать темперамент по карточке и лорбуку')}
+            ${mech('booze') && user() ? `<div class="brn-rng"><label>Как алкоголь берёт ${esc(short(user()))}<b data-out>${meTol()}</b></label><input type="range" min="0.4" max="6" step="0.1" value="${meTol()}" data-bin="me" data-k="booze"><small>Твоего персонажа мозг не ведёт — только считает выпитое: стадию и похмелье. 0.6 — с бокала, 1 — как всех, 4 и выше — почти не берёт.</small></div>${meNow() ? '' : '<div class="lf-chips"><button class="lf-chip" data-bact="me-drink">налить</button></div>'}` : ''}
             <div class="lf-hint">Мозг ${VERSION}. Летописец после каждого ответа называет, что случилось с человеком; оси, волю, напряжение и несказанное считает код, время — по Horae. Модель получает кассету — без цифр.${A.senses ? '' : ' Life старой версии: раны, недосып и Камни мозг пока не видит — обнови Life.'}</div>
         </details>`;
 }
@@ -1477,6 +1586,7 @@ async function onClick(ev) {
         if (act === 'nudge' && KIND_NAME[el.dataset.k]) manual(who, { act: 'nudge', k: el.dataset.k });
         if (act === 'rest') manual(who, { act: 'rest' });
         if (act === 'drink' || act === 'sober') manual(who, { act });
+        if (act === 'me-drink' || act === 'me-sober') meHand(act === 'me-drink' ? 'drink' : 'sober');
         if (act === 'reset') manual(who, { act: 'reset' });
         if (act === 'feed') manual(who, { act: 'feed', k: el.dataset.k, d: Number(el.dataset.d) || 0 });
         if (act === 'unmark') manual(who, { act: 'unmark', id: el.dataset.id });
@@ -1525,6 +1635,7 @@ function onChange(ev) {
     const k = el.dataset.k || '';
     try {
         if (kind === 'g') { cfg()[k] = !!el.checked; saveCfg(); }
+        if (kind === 'me' && k === 'booze') { cfg().meBooze = P.clamp(el.value, 0.4, 6); saveCfg(); safe(() => A.updatePrompt()); }
         if (kind === 'm' && MECH.some(x => x[0] === k)) { cfg().mech[k] = !!el.checked; saveCfg(); }
         if (kind === 'on') editTemper(who, (t) => { t.on = !!el.checked; });
         if (kind === 't') {
@@ -1655,6 +1766,8 @@ globalThis.LifeBrain = {
     /** Была ли у него сегодня плохая ночь. */
     night: (who) => safe(() => { if (!on() || !mine(who)) return false; const s = stateOf(who); return !!s.night?.bad && s.night.day === nowStamp().day; }, false),
     open: (who) => safe(() => openBrain(who)),
+    /** Персонаж игрока: { drunk: стадия 0…4, hung: похмелье 0…2 } — мозг его не ведёт, только считает выпитое. */
+    me: () => safe(() => { const me = meNow(); return { drunk: me?.stage || 0, hung: me?.hung || 0 }; }, { drunk: 0, hung: 0 }),
     /** Прогнать фоновую настройку сейчас: круг «своих», способы привязываться по умолчанию, сбор темперамента. */
     ensure: () => ensure(),
 };
