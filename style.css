@@ -185,3 +185,10 @@
 .brn-me .tip { color: var(--lf-text); opacity: .86; }
 .brn-me .tip b { font: 600 12.5px var(--lf-sans); }
 .brn-me .lf-chips { margin-top: 6px; }
+
+/* 0.10: кто привязан намертво, пометка «кто расставил» */
+.brn-own { margin-top: 10px; }
+.brn-own select { width: 100%; min-width: 0; font-size: 13px; padding: 8px 26px 8px 10px; }
+.brn-own select:disabled { opacity: .55; }
+.brn-by { margin: 6px 0 0; font-style: italic; }
+.brn-own + .brn-trope, .brn-by + .brn-trope { margin-top: 8px; }

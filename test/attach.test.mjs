@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as P from '../core/psyche.js';
-import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, tropeLine, tropeMul, rejectOf, normSpine, hasSpine, spineLine } from '../core/attach.js';
+import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, tropeLine, tropeMul, ownSide, rejectOf, normSpine, hasSpine, spineLine } from '../core/attach.js';
 import { tie, pairStats, lens, afterHurt } from '../core/bonds.js';
 import { combos } from '../core/drives.js';
 import { hints } from '../core/hints.js';
@@ -342,4 +342,19 @@ test('качели статуса: уверенного придавило — �
     const s = { ...P.fresh(), dr: { bond: 60, safe: 60, free: 60, need: 60, quiet: 60, novel: 60 } };
     assert.match(combos({ s, dom: { id: 'shame', step: 2 }, status: 'drop' }).find(c => c.id === 'drop').t, /привычная уверенность слетела/);
     assert.match(combos({ s, dom: { id: '', step: 0 }, status: 'rise' }).find(c => c.id === 'rise').t, /непривычно выпрямляется/);
+});
+
+// ───────────── 0.10 ─────────────
+
+test('новые тропы: создатель и творение, один уже любит; «намертво» бывает в одну сторону', () => {
+    assert.match(tropeLine({ id: 'maker', rom: 'no' }, 'Вальден', true), /узнаёт в себе его руку[\s\S]*убить не выходит и простить не выходит/);
+    assert.match(tropeLine({ id: 'uneven', rom: 'hint' }, 'Тео', false, 'soft'), /несимметрично[\s\S]*сейчас — тот, кто любит, ничего не просит/);
+    assert.deepEqual(tropeMul('uneven', { warm: 2, loss: 1, blow: 2 }), { warm: 1.2, loss: 1.15 });
+    const p = { a: 'Хеди', b: 'Баки', own: 'a' };
+    assert.equal(ownSide(p, 'Хеди'), true);
+    assert.equal(ownSide(p, 'Баки'), false, 'у неё уже намертво, у него только начинается');
+    assert.equal(ownSide({ ...p, own: 'both' }, 'Баки'), true);
+    assert.equal(ownSide({ ...p, own: '' }, 'Хеди'), false);
+    assert.equal(ownSide(null, 'Хеди'), false);
+    assert.equal(ownSide({ a: 'Хеди Барлоу', b: 'Баки Барнс', own: 'b' }, 'Баки', (x, y) => x.split(' ')[0] === y.split(' ')[0]), true);
 });

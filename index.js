@@ -10,10 +10,10 @@ import { EMO_NAME, EMO_TITLE, EMO_ICON, WILL_TEXT, WILL_NAME, SINGLES, SINGLE_TI
 import { DRIVE_NAME, DRIVE_ICON, BAND_NAME, freshDrives, healDrives, driveHit, driveDecay, driveBand, combos } from './core/drives.js';
 import { hints } from './core/hints.js';
 import { SOFT, tie, pairStats, lens, haven, afterHurt, stayStyle, grudgeDecay } from './core/bonds.js';
-import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, ROM_NAME, tropeLine, tropeMul, rejectOf, SPINE_KEYS, SPINE_NAME, hasSpine, spineLine } from './core/attach.js';
+import { STYLES, STYLE_IDS, styleId, styleLine, STYLE_EASE, STYLE_OBJECT, statusHabit, statusFlip, TROPES, TROPE_IDS, ROM_NAME, tropeLine, tropeMul, ownSide, rejectOf, SPINE_KEYS, SPINE_NAME, hasSpine, spineLine } from './core/attach.js';
 import { STAGE_NAME, stageOf, tolOf, drink, sober, boozeNow, DRUNK, HUNG, SEEN, SEEN_HUNG, playerTips } from './core/booze.js';
 
-const VERSION = '0.9.0';
+const VERSION = '0.10.0';
 const ID = 'brain';
 const TITLE = '🧠 Мозг';
 const NARR = /рассказчик|narrator|мастер|game ?master|(^|[^a-z])gm([^a-z]|$)|мнемозина/i;
@@ -46,7 +46,7 @@ const SEED_CIRCLE = ['Хеди', 'Баки', 'Наташа', 'Тони', 'Еле
 // как привязывается каждый из известных (предложение по умолчанию — правится в листе): способ, рана отвержения, как берёт алкоголь
 const SEED_TEMPER = { 'Баки': { attach: 'guard', reject: 1.4, booze: 2.5 }, 'Наташа': { attach: 'armor', reject: 1.5 }, 'Тони': { attach: 'fix', reject: 1.2, booze: 1.4 }, 'Елена': { attach: 'test', reject: 1.5, booze: 1.3 }, 'Питер': { attach: 'serve', reject: 1.3, booze: 0.8 } };
 // тропы пар по умолчанию: [кто, с кем, троп, романтика]
-const SEED_PAIRS = [['Хеди', 'Баки', 'hybrid', 'yes'], ['Хеди', 'Наташа', 'hybrid', 'hint'], ['Хеди', 'Тони', 'kin', 'no'], ['Хеди', 'Елена', 'sisters', 'no'], ['Наташа', 'Елена', 'sisters', 'no'], ['Баки', 'Тони', 'truce', 'no'], ['Баки', 'Наташа', 'comrades', 'no'], ['Тони', 'Наташа', 'comrades', 'no'], ['Хеди', 'Питер', 'sibling', 'no']];
+const SEED_PAIRS = [['Хеди', 'Баки', 'hybrid', 'yes', 1], ['Хеди', 'Наташа', 'hybrid', 'hint', 1], ['Хеди', 'Тони', 'kin', 'no', 1], ['Хеди', 'Елена', 'sisters', 'no'], ['Наташа', 'Елена', 'sisters', 'no'], ['Баки', 'Тони', 'truce', 'no'], ['Баки', 'Наташа', 'comrades', 'no'], ['Тони', 'Наташа', 'comrades', 'no'], ['Хеди', 'Питер', 'sibling', 'no']];
 const TEMPER_V = 8;      // с какой версии в темпераменте есть способ привязываться, стержень и алкоголь
 const PAIR_STAT = [['blur', 'Прощает'], ['haven', 'Гавань'], ['fuse', 'Ревность наготове'], ['dread', 'Страх потерять']];
 const INIT_NAME = { care: 'забота', court: 'ухаживание', flirt: 'флирт', touch: 'касание', spicy: 'откровенность', gift: 'подарок', own: 'своё дело', talk: 'разговор', plot: 'затея' };
@@ -113,10 +113,23 @@ const saveM = () => { try { ctx().saveMetadataDebounced?.(); } catch { /* */ } }
  * складываются: в одной эпохе едва встретились, в другой один уже любит, а второй только начинает. Ядра нет или
  * чат вне мира — не прошлое. Снимок ядра помним полсекунды: круг спрашивают на каждом шагу.
  */
-let eraMemo = { at: 0, past: false };
+let eraMemo = { at: 0, past: false, era: null };
 function pastEra() {
-    if (Date.now() - eraMemo.at > 500) eraMemo = { at: Date.now(), past: safe(() => { const e = globalThis.SacredTimeline?.context?.()?.era; return !!(e && e.to); }, false) };
+    if (Date.now() - eraMemo.at > 500) {
+        const e = safe(() => globalThis.SacredTimeline?.context?.()?.era || null, null);
+        eraMemo = { at: Date.now(), past: !!(e && e.to), era: e ? { id: str(e.id, 40), from: str(e.from, 20), to: str(e.to, 20), name: str(e.name || e.title || e.label || '', 60) } : null };
+    }
     return eraMemo.past;
+}
+/** Когда происходит этот чат — строкой для запросов к ИИ: эпоха ядра и дата истории. Пусто, если не знаем ни того, ни другого. */
+function whenLine() {
+    pastEra();
+    const e = eraMemo.era;
+    const day = String(safe(() => A.worldState()?.timestamp?.story_date, '') || '').trim();
+    const bits = [];
+    if (e && (e.name || e.id)) bits.push(`эпоха «${e.name || e.id}»${e.from ? ` (${e.from} — ${e.to || 'по сей день'})` : ''}`);
+    if (day) bits.push(`дата в истории — ${day}`);
+    return bits.length ? `Время этого чата: ${bits.join('; ')}. Суди на эту дату: того, что случится позже, герои ещё не пережили и друг о друге ещё не знают — будущее сюда не переноси.` : '';
 }
 const sameList = (a, b) => a.length === b.length && a.every((x, k) => x === b[k]);
 const nm = (v) => (A.norm ? A.norm(A.canonName(v)) : String(A.canonName(v) ?? '').toLowerCase().replace(/ё/g, 'е').trim());
@@ -194,7 +207,7 @@ function syncCircle() {
 function pairs() {
     const m = M();
     // в чате прошлой эпохи тропы сами не сеются: там эти двое могли ещё и не встретиться
-    if (!Array.isArray(m.pairs)) m.pairs = circle().length && !pastEra() ? SEED_PAIRS.map(([a, b, id, rom]) => ({ a, b, id, rom })) : [];
+    if (!Array.isArray(m.pairs)) m.pairs = circle().length && !pastEra() ? SEED_PAIRS.map(([a, b, id, rom, her]) => (her ? { a, b, id, rom, her: true } : { a, b, id, rom })) : [];
     return m.pairs;
 }
 const pairOf = (a, b) => (a && b ? pairs().find(p => (A.sameName(p.a, a) && A.sameName(p.b, b)) || (A.sameName(p.a, b) && A.sameName(p.b, a))) || null : null);
@@ -203,7 +216,9 @@ function setPair(a, b, patch) {
     let p = pairOf(a, b);
     if (!p) { p = { a: A.canonName(a), b: A.canonName(b), id: '', rom: 'no' }; list.push(p); }
     Object.assign(p, patch);
-    if (!TROPES[p.id]) list.splice(list.indexOf(p), 1);
+    // пара без тропа живёт, только если в ней отмечено «намертво»
+    if (!TROPES[p.id] && !p.own) list.splice(list.indexOf(p), 1);
+    relCache.clear();
     saveM();
 }
 // ───────────── персонаж игрока: мозг его не ведёт — только считает выпитое ─────────────
@@ -261,6 +276,8 @@ function meLine(here) {
 
 /** Известным персонажам — способ привязываться по умолчанию (один раз; дальше — как поправишь). */
 function seedTemper(who) {
+    // способы по умолчанию — про героев настоящего; в прошлой эпохе способ выбирает ИИ по её карточке и лорбуку
+    if (pastEra()) return;
     const k = keyOf(who);
     const raw = cfg().prof[k];
     if (raw?.seeded) return;
@@ -279,11 +296,29 @@ const on = () => !!A && !!A.hasChat?.() && lifeOn() && cfg().on !== false;
 const mech = (k) => cfg().mech[k] !== false;
 
 /** Ключ темперамента: в другой эпохе («Священный таймлайн») у того же человека — свой. */
-const keyOf = (who) => { try { return A.lore?.key?.(who) || A.canonName(who) || who; } catch { return A.canonName(who) || who; } };
-const temperOf = (who) => P.normTemper(cfg().prof[keyOf(who)]);
+const baseKey = (who) => { try { return A.lore?.key?.(who) || A.canonName(who) || who; } catch { return A.canonName(who) || who; } };
+/**
+ * Ключ темперамента. В чате прошлой эпохи — свой на эпоху: там это другой человек (ещё до падения, до Гидры, до
+ * свадьбы), и у него свои кассеты, убеждения и способ привязываться. В настоящем и вне мира — общий.
+ */
+const keyOf = (who) => { const b = baseKey(who); return pastEra() && eraMemo.era?.id ? `${b}@${eraMemo.era.id}` : b; };
+/**
+ * Сырой темперамент. У эпохи своего ещё нет — пока ИИ не собрал, берём числа и кассеты из настоящего, но без всего,
+ * что привязано ко времени: способ привязываться, рана, стержень, убеждения, даты и «что возвращает» — пусто, их
+ * соберёт ИИ по карточке и лорбуку этой эпохи.
+ */
+function rawTemper(who) {
+    const c = cfg(), k = keyOf(who);
+    if (c.prof[k]) return c.prof[k];
+    const b = baseKey(who);
+    if (k === b || !c.prof[b]) return undefined;
+    const { attach, reject, spine, beliefs, dates, fix, seeded, story, note, ...rest } = c.prof[b];
+    return { ...rest, src: 'auto', v: 0 };
+}
+const temperOf = (who) => P.normTemper(rawTemper(who));
 function editTemper(who, fn) {
     const k = keyOf(who);
-    const t = P.normTemper(cfg().prof[k]);
+    const t = P.normTemper(rawTemper(who));
     fn(t);
     cfg().prof[k] = t;
     saveCfg();
@@ -383,9 +418,11 @@ const doubt = (s, t) => Math.max(0, ...t.beliefs.map(b => P.beliefHp(s, b.id) / 
 /** Связь who → to: { to, t — доли и сила привязанности, st — умные статы пары сейчас }. */
 function bondTo(who, to, s, E, t = temperOf(who)) {
     if (!to || A.sameName(who, to)) return null;
-    const ti = tie(relTo(who, to), { cosmic: inCircle(who) && inCircle(to) });
+    // «намертво» — либо оба в круге «своих», либо в паре отмечено, что этот человек уже привязан так (может быть и в одну сторону)
+    const ti = tie(relTo(who, to), { cosmic: (inCircle(who) && inCircle(to)) || ownSide(pairOf(who, to), who, A.sameName) });
     const own = mech('style');
-    return ti ? { to: A.canonName(to), t: ti, st: pairStats(ti, { E, dr: s.dr, bel: doubt(s, t), style: own ? styleId(t.attach) : '', reject: own ? rejectOf(t) : 1 }), tr: own ? pairOf(who, to) : null } : null;
+    const pr = own ? pairOf(who, to) : null;
+    return ti ? { to: A.canonName(to), t: ti, st: pairStats(ti, { E, dr: s.dr, bel: doubt(s, t), style: own ? styleId(t.attach) : '', reject: own ? rejectOf(t) : 1 }), tr: pr && TROPES[pr.id] ? pr : null, pr } : null;
 }
 /** Все его связи с теми, кто в истории главный (и с героиней игрока), от самой сильной. */
 function bondsOf(who, s, E, t = temperOf(who)) {
@@ -635,16 +672,18 @@ function chron(i) {
     const who = list();
     if (!who.length) return null;
     let extra = 0;
+    let goals = false;
     const cur = who.map(n => {
         const v = view(n);
         const bits = [`${n} — ${v.dom.id ? `${domLabel(v.dom)} (${v.dom.step} из ${P.EMO_STEPS[v.dom.id]})` : 'ровно'}`];
         if (v.t.fix.length) { bits.push(`возвращает: ${v.t.fix.map((f, k) => `[${k + 1}] ${f}`).join(', ')}`); extra += 25; }
         const bel = v.t.beliefs.filter(b => P.beliefHp(v.s, b.id) > 0);
         if (bel.length) { bits.push(`убеждения: ${bel.map(b => `[${b.id}] «${b.t}»`).join(', ')}`); extra += 25; }
+        if (mech('spine') && v.t.spine.goal) { bits.push(`добивается: ${v.t.spine.goal}`); goals = true; }
         return bits.join('; ');
     });
     const full = safe(() => playerPost(i), '');
-    return { key: '"psy": []', rule: RULE, tokens: 85 + who.length * 50 + extra, input: `Психика (оцени, что с ними случилось в этих постах): ${cur.join(' | ')}${mech('booze') && user() ? ` | персонаж игрока: ${short(user())} (только выпитое)` : ''}${full ? `\nПост игрока целиком (выше он обрезан; учитывай его весь — во всех разделах):\n${full}` : ''}` };
+    return { key: '"psy": []', rule: RULE, tokens: 85 + who.length * 50 + extra, input: `Психика (оцени, что с ними случилось в этих постах): ${cur.join(' | ')}${mech('booze') && user() ? ` | персонаж игрока: ${short(user())} (только выпитое)` : ''}${goals ? ' | в разделе идей (ideas) инициативу человека выводи из того, чего он добивается, а не из удобства сцены' : ''}${full ? `\nПост игрока целиком (выше он обрезан; учитывай его весь — во всех разделах):\n${full}` : ''}` };
 }
 
 function log(s, e) {
@@ -965,7 +1004,7 @@ const hungText = (t, bz) => `${str(t.cass?.hung, 320) ? `${bz.hung === 2 ? 'тя
 /** С кем из тех, кто в сцене, у него троп: сначала тот, от кого только что прилетело или кого ревнует, потом самый близкий. */
 function tropeWith(who, v, here = present()) {
     const { s } = v;
-    const all = bondsOf(who, s, v.E, v.t).filter(b => b.tr && inScene(b.to, here));
+    const all = bondsOf(who, s, v.E, v.t).filter(b => b.tr && TROPES[b.tr.id] && inScene(b.to, here));
     if (!all.length) return null;
     const hot = all.find(b => (s.hurtBy && A.sameName(s.hurtBy.to, b.to)) || (num(s.jeal) >= 25 && A.sameName(s.jealTo, b.to)));
     return hot || all[0];
@@ -1195,7 +1234,7 @@ async function sourcesOf(name) {
     let lore = '';
     try { lore = (await L.about?.(name, { max: 12000 })) || ''; } catch { /* */ }
     if (!card && !lore && !core) throw new Error('ни карточки, ни лорбука о нём не нашлось');
-    return [`Персонаж: ${name}`, core ? `Ядро характера:\n${core}` : '', card ? `Карточка:\n${card}` : '', lore ? `Лорбук:\n${lore}` : ''].filter(Boolean).join('\n\n');
+    return [`Персонаж: ${name}`, whenLine(), core ? `Ядро характера:\n${core}` : '', card ? `Карточка:\n${card}` : '', lore ? `Лорбук:\n${lore}` : ''].filter(Boolean).join('\n\n');
 }
 /** Способ привязываться, рана отвержения, алкоголь, стержень — из ответа модели в темперамент. Заданное раньше не затирается. */
 function applyDepth(x, j) {
@@ -1220,6 +1259,55 @@ async function topUp(who) {
     const j = whole && A.askFillJson ? await A.askFillJson(msgs, 1800, check, { who: name, max: 14000 }) : await A.askJson(msgs, 1000, check);
     editTemper(name, (x) => applyDepth(x, j));
     return temperOf(name);
+}
+
+const BONDS_SYS = () => `Ты расставляешь связи между героями ролевой истории для «код-мозга». По карточкам, лорбукам (и своду всей истории, если он дан) определи, что между ними на ту дату, в которой идёт этот чат. Ответь только одним JSON по-русски:
+{"pairs":[{"a":"имя","b":"имя","trope":"hybrid","rom":"no","own":"none","why":"почему так, 5–14 слов"}]}
+trope — по какому сценарию эти двое существуют вместе (одно слово из списка):
+${TROPE_IDS.map(k => `${k} — ${TROPES[k].name}: ${TROPES[k].dyn}`).join('\n')}
+rom — yes: это любовь, и оба это знают; hint: больше, чем дружба, но вслух этого нет; no — романтики нет.
+own — кто к кому УЖЕ привязан намертво (что бы ни случилось, не отвернётся и простит что угодно): "a" — только первый ко второму, "b" — только второй к первому, "both" — оба, "none" — обычная связь, которая ещё складывается. Не завышай: «намертво» — это годы и общая беда за плечами, а не симпатия и не первая влюблённость.
+Пары: каждый персонаж с персонажем игрока и персонажи между собой — только там, где между ними на эту дату действительно что-то есть. Не знакомы, едва знакомы или друг другу никто — пару пропусти. Имена пиши ровно так, как они даны. Не больше шестнадцати пар.`;
+
+/**
+ * Связи этого чата расставляет ИИ: троп пары, романтика и кто к кому уже привязан намертво — на дату чата (в прошлой
+ * эпохе отношения другие, и «намертво» бывает в одну сторону). Вписанное руками и названное ею самой не трогает;
+ * прежнюю расстановку ИИ заменяет новой. Замки в Life не ставит: «намертво» из пары живёт только в мозге.
+ */
+async function fillBonds() {
+    const U = user();
+    const cast = [U, ...mains()].filter(Boolean).slice(0, 9);
+    if (cast.length < 2) throw new Error('в этом чате некого связывать');
+    const whole = safe(() => !!A.story?.ready(), false);
+    const parts = [];
+    for (const n of cast) { try { parts.push((await sourcesOf(n)).slice(0, whole ? 2600 : 4200)); } catch { /* о нём ничего не нашлось — не беда */ } }
+    if (!parts.length) throw new Error('ни карточек, ни лорбука о них не нашлось');
+    const usr = [`Герои (так их и называй): ${cast.join('; ')}. Персонаж игрока: ${U || '—'}.`, whenLine(), ...parts].filter(Boolean).join('\n\n———\n\n');
+    const check = { check: (x) => !!x && Array.isArray(x.pairs), what: 'Связи' };
+    const msgs = [{ role: 'system', content: BONDS_SYS() + (whole ? '\nТебе дан «Свод всей истории»: он важнее общих слов карточек — суди по тому, что между ними на деле было.' : '') }, { role: 'user', content: usr }];
+    const j = whole && A.askFillJson ? await A.askFillJson(msgs, 2600, check, { max: 16000 }) : await A.askJson(msgs, 1700, check);
+    const known = (n) => { const x = str(n, 60); return x ? (cast.find(c => A.sameName(c, x)) ? A.canonName(cast.find(c => A.sameName(c, x))) : x) : ''; };
+    const same = (p, a, b) => (A.sameName(p.a, a) && A.sameName(p.b, b)) || (A.sameName(p.a, b) && A.sameName(p.b, a));
+    const m = M();
+    // остаются: вписанное руками, названное ею и нетронутые тропы по умолчанию; прежняя расстановка ИИ уходит
+    const next = pairs().filter(p => p.by !== 'ai' || p.hand);
+    let n = 0;
+    for (const r of j.pairs.slice(0, 16)) {
+        const a = known(r?.a), b = known(r?.b);
+        if (!a || !b || A.sameName(a, b) || !TROPES[r.trope]) continue;
+        const had = next.find(p => same(p, a, b));
+        if (had && (had.hand || had.her)) continue;
+        const row = { a, b, id: r.trope, rom: ROM_NAME[r.rom] ? r.rom : 'no', own: ['a', 'b', 'both'].includes(r.own) ? r.own : '', why: str(r.why, 140), by: 'ai' };
+        if (had) next.splice(next.indexOf(had), 1, row); else next.push(row);
+        n++;
+    }
+    m.pairs = next;
+    m.bondsAt = Date.now();
+    m.bondsStory = whole;
+    relCache.clear();
+    saveM();
+    safe(() => A.updatePrompt());
+    return n;
 }
 
 async function collect(who) {
@@ -1317,6 +1405,20 @@ async function ensure() {
                 refresh();
             } catch (e) { console.warn(`[Мозг] темперамент ${who}`, e); }
         }
+        // связи: в чате, где троп ни у кого не задан, расставляет ИИ; свод появился позже — один раз заново
+        const m = M();
+        const whole = safe(() => !!A.story?.ready(), false);
+        const empty = !pairs().length && !m.bondsAt;
+        const redo = !!m.bondsAt && whole && m.bondsStory === false;
+        if (mech('style') && list().length && (empty || redo) && Date.now() - num(m.bondsTried) >= 6 * 36e5) {
+            m.bondsTried = Date.now();
+            saveM();
+            try {
+                const n = await fillBonds();
+                if (n) A.toast('success', `Связи расставлены по истории: ${n}. Посмотреть и поправить — Сцена → ${TITLE} → «К кому как».`, TITLE, { timeOut: 6000 });
+                refresh();
+            } catch (e) { console.warn('[Мозг] связи', e); }
+        }
     } finally { ensuring = false; }
 }
 
@@ -1399,8 +1501,14 @@ function bondsHtml(v, who) {
     const opt = (val, cur, label) => `<option value="${val}"${val === cur ? ' selected' : ''}>${esc(label)}</option>`;
     const tropeRow = (b) => {
         if (!own) return '';
-        const tr = b.tr || { id: '', rom: 'no' };
-        return `<div class="brn-trope"><select data-bin="tr" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Троп пары">${opt('', tr.id, 'троп не задан')}${TROPE_IDS.map(k => opt(k, tr.id, TROPES[k].name)).join('')}</select><select data-bin="rom" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Романтика"${tr.id ? '' : ' disabled'}>${Object.entries(ROM_NAME).map(([k, l]) => opt(k, tr.rom || 'no', l)).join('')}</select></div>
+        const tr = b.pr || { id: '', rom: 'no' };
+        const both = inCircle(who) && inCircle(b.to);
+        const side = (n) => (tr.a && A.sameName(tr.a, n) ? 'a' : tr.b && A.sameName(tr.b, n) ? 'b' : A.sameName(n, who) ? 'a' : 'b');
+        const ownSel = both
+            ? `<select disabled aria-label="Намертво"><option>оба намертво — круг «своих»</option></select>`
+            : `<select data-bin="own" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Кто привязан намертво">${opt('', tr.own || '', 'связь ещё складывается')}${opt(side(who), tr.own || '', `${short(who)} — намертво`)}${opt(side(b.to), tr.own || '', `${short(b.to)} — намертво`)}${opt('both', tr.own || '', 'оба намертво')}</select>`;
+        const note = tr.hand ? '✋ вписано руками — ИИ не тронет' : tr.her ? 'так решила ты — ИИ не тронет' : tr.by === 'ai' ? `ИИ: ${tr.why || 'по истории'}` : '';
+        return `<div class="brn-own">${ownSel}</div>${note ? `<div class="lf-hint brn-by">${esc(note)}</div>` : ''}<div class="brn-trope"><select data-bin="tr" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Троп пары">${opt('', tr.id, 'троп не задан')}${TROPE_IDS.map(k => opt(k, tr.id, TROPES[k].name)).join('')}</select><select data-bin="rom" data-who="${esc(who)}" data-to="${esc(b.to)}" aria-label="Романтика"${tr.id ? '' : ' disabled'}>${Object.entries(ROM_NAME).map(([k, l]) => opt(k, tr.rom || 'no', l)).join('')}</select></div>
             ${TROPES[tr.id] ? `<div class="lf-hint">${esc(cap(TROPES[tr.id].dyn))}. Под давлением: ${esc(TROPES[tr.id].dark)}.</div>` : ''}`;
     };
     const row = (b) => {
@@ -1415,6 +1523,7 @@ function bondsHtml(v, who) {
     return `${A.sec('К кому как', 'считается каждый пост')}
         ${sty ? `<div class="brn-style"><b>Привязывается: ${esc(sty.name)}</b><small>${esc(sty.how)}${rejectOf(v.t) >= 1.3 ? ' · рана отвержения: заранее ждёт, что бросят' : ''}</small></div>` : ''}
         <div class="brn-bonds">${list.map(row).join('')}</div>
+        ${own ? `<div class="lf-chips"><button class="lf-chip" data-bact="bonds-fill">✨ Расставить связи по истории</button></div><div class="lf-hint">ИИ читает карточки, лорбуки и свод и расставляет тропы, романтику и то, кто к кому уже привязан намертво, — на дату этого чата. В чате, где связей ещё нет, делает это сам. Вписанное руками не трогает.</div>` : ''}
         <div class="lf-hint">Шкалы пары — из «Отношений» Life. Здесь — что из них выходит прямо сейчас.</div>
         <details class="lf-details" ${det('circle')}><summary>Свои <small>космическая привязанность · ${circle().length ? esc(circle().join(', ')) : 'никого'}</small></summary>
             <div class="lf-field"><label>Кто между собой «свои» — по имени на строку</label><textarea rows="5" data-bin="circle">${esc(circle().join('\n'))}</textarea></div>
@@ -1485,7 +1594,7 @@ function temperHtml(who, t) {
         ${range(who, 'wit', t.wit, 0, 2, 0.1, 'Юмор', '0 — не шутит никогда, 2 — шутит всегда и обо всём; каким юмором — решает состояние')}
         ${A.sec('Как привязывается', 'к своим')}
         <div class="lf-field"><select data-bin="ts" data-k="attach" data-who="${esc(who)}" aria-label="Как привязывается"><option value="">не задано</option>${STYLE_IDS.map(k => `<option value="${k}"${styleId(t.attach) === k ? ' selected' : ''}>${esc(STYLES[k].name)}</option>`).join('')}</select></div>
-        ${STYLES[styleId(t.attach)] ? `<div class="lf-hint">${esc(cap(STYLES[styleId(t.attach)].how))}. Когда связь под угрозой — ${esc(STYLES[styleId(t.attach)].kind)}.</div>` : ''}
+        ${STYLES[styleId(t.attach)] ? `<div class="lf-hint">${esc(cap(STYLES[styleId(t.attach)].how))}. Когда связь под угрозой — ${esc(STYLES[styleId(t.attach)].kind)}.</div>` : '<div class="lf-hint">Не задано — выберет ИИ при сборе темперамента (кнопка ниже), по карточке, лорбуку и своду.</div>'}
         ${range(who, 'reject', t.reject, 0.5, 2, 0.1, 'Рана отвержения', '1 — как у всех; выше — заранее ждёт, что бросят: сильнее боится потерять, ревнует, уход читает громче')}
         ${A.sec('Стержень', 'чем живёт')}
         ${SPINE_KEYS.map(k => `<div class="lf-field"><label>${SPINE_NAME[k]}</label><textarea rows="2" data-bin="sp" data-k="${k}" data-who="${esc(who)}">${esc(t.spine[k])}</textarea></div>`).join('')}
@@ -1701,6 +1810,12 @@ async function onClick(ev) {
         if (act === 'nudge' && KIND_NAME[el.dataset.k]) manual(who, { act: 'nudge', k: el.dataset.k });
         if (act === 'rest') manual(who, { act: 'rest' });
         if (act === 'drink' || act === 'sober') manual(who, { act });
+        if (act === 'bonds-fill') {
+            let n = 0;
+            const run = async () => { n = await fillBonds(); };
+            if (A.withBusy) await A.withBusy(el, run, 'Читаю…'); else await run();
+            A.toast(n ? 'success' : 'info', n ? `Связи расставлены: ${n}.` : 'ИИ не нашёл, что расставить: вписанное тобой осталось как было.', TITLE, { timeOut: 3500 });
+        }
         if (act === 'me-drink' || act === 'me-sober') meHand(act === 'me-drink' ? 'drink' : 'sober');
         if (act === 'reset') manual(who, { act: 'reset' });
         if (act === 'feed') manual(who, { act: 'feed', k: el.dataset.k, d: Number(el.dataset.d) || 0 });
@@ -1776,8 +1891,9 @@ function onChange(ev) {
         }
         if (kind === 'ts' && k === 'attach') editTemper(who, (t) => { t.attach = styleId(el.value); t.seeded = TEMPER_V; });
         if (kind === 'sp' && SPINE_KEYS.includes(k)) editTemper(who, (t) => { t.spine[k] = str(String(el.value || '').replace(/\s+/g, ' '), 180); t.v = TEMPER_V; });
-        if (kind === 'tr') setPair(who, el.dataset.to, { id: TROPES[el.value] ? el.value : '' });
-        if (kind === 'rom' && pairOf(who, el.dataset.to)) setPair(who, el.dataset.to, { rom: ROM_NAME[el.value] ? el.value : 'no' });
+        if (kind === 'tr') setPair(who, el.dataset.to, { id: TROPES[el.value] ? el.value : '', hand: true });
+        if (kind === 'rom' && pairOf(who, el.dataset.to)) setPair(who, el.dataset.to, { rom: ROM_NAME[el.value] ? el.value : 'no', hand: true });
+        if (kind === 'own') { setPair(who, el.dataset.to, { own: ['a', 'b', 'both'].includes(el.value) ? el.value : '', hand: true }); safe(() => A.updatePrompt()); }
         if (kind === 'circle') { M().circle = linesOf(el.value).map(x => str(x, 40)).filter(Boolean).slice(0, 12); M().circleAuto = false; saveM(); relCache.clear(); syncCircle(); }   // вписано руками — эпоха круг больше не чистит
         if (kind === 'f') editTemper(who, (t) => { t.fix = linesOf(el.value); t.src = 'hand'; });
         if (kind === 'b') {
