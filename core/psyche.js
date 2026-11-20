@@ -11,8 +11,8 @@ export const AXES = ['val', 'aro', 'ctl', 'wor'];
 export const DRIVES = ['bond', 'safe', 'free', 'need', 'quiet', 'novel'];
 
 /** Что может случиться с человеком. Летописец ставит силу 0–3 каждому виду. */
-export const KINDS = ['warm', 'fun', 'win', 'calm', 'threat', 'blow', 'bound', 'wrong', 'loss', 'held', 'open'];
-export const NEGATIVE = ['threat', 'blow', 'bound', 'wrong', 'loss'];
+export const KINDS = ['warm', 'fun', 'win', 'calm', 'threat', 'blow', 'bound', 'wrong', 'loss', 'rival', 'held', 'open'];
+export const NEGATIVE = ['threat', 'blow', 'bound', 'wrong', 'loss', 'rival'];
 
 /** Сила 0–3 → единицы сдвига. */
 export const STEP = [0, 10, 22, 36];
@@ -28,6 +28,8 @@ const HIT = {
     bound: { val: -0.45, aro: 0.5, ctl: -1.0, wor: -0.25, strain: 0.75, will: 0 },
     wrong: { val: -1.0, aro: 0.8, ctl: 0.1, wor: 0, strain: 0.65, will: 0 },
     loss: { val: -1.0, aro: -0.5, ctl: -0.2, wor: -0.2, strain: 0.5, will: 0 },
+    // ревность: у того, кто дорог, появился кто-то ещё. Чем она станет — злостью, страхом или стыдом, — решают его оси
+    rival: { val: -0.7, aro: 0.7, ctl: -0.45, wor: -0.7, strain: 0.7, will: 0 },
     held: { val: 0, aro: 0, ctl: 0, wor: 0, strain: 0.3, will: -0.5 },
     open: { val: 0.35, aro: -0.2, ctl: 0.2, wor: 0.35, strain: -0.5, will: 0.15 },   // выговорился, показал настоящее — отпускает
 };
@@ -41,6 +43,9 @@ export const STRAIN_HL = 18;      // напряжение
 export const MASK_HL = 36;        // несказанное выветривается медленно
 export const MOOD_SHARE = 0.35;   // какая доля события оседает в настроении
 export const MUL_CAP = 1.35;      // потолок «характер × больное место»: одно событие не должно сносить человека
+export const TOTAL_CAP = 2.05;    // потолок всех множителей одного события разом (характер × сырые нервы × линза привязанности)
+export const JEAL_HL = 12;        // ревность остывает наполовину
+export const DOM_MARGIN = 8;      // доминанта: другое чувство перехватывает, только обогнав её на столько
 export const RAW_CAP = 1.5;       // потолок «сырых нервов»
 export const BASE_SHARE = 0.5;    // насколько его обычное состояние считается чувством: живёт с этим годами — привык
 export const WILL_REGEN = 4;      // воли в час истории
@@ -69,6 +74,7 @@ export function defaultTemper() {
         beliefs: [],   // с чем о себе живёт: [{ id, t: 'я испорченный', truth: 'что станет правдой, если сломается' }]
         dates: [],     // дни, которые помнит телом: [{ md: '12-16', t: 'что это', kind: 'loss' | 'blow' }]
         want: { bond: 1, safe: 1, free: 1, need: 1, quiet: 1, novel: 1 },   // насколько ему нужна каждая потребность
+        wit: 1,        // насколько он вообще шутит (0 — никогда, 2 — шутит всегда и обо всём)
         note: '',
         src: 'auto',
     };
@@ -85,6 +91,7 @@ export function normTemper(t) {
     out.react = r1(clamp(x.react ?? 1, 0.4, 2));
     out.recover = r1(clamp(x.recover ?? 1, 0.4, 2.5));
     out.grit = r1(clamp(x.grit ?? 1, 0.4, 2));
+    out.wit = r1(clamp(x.wit ?? 1, 0, 2));
     out.sens = {};
     for (const k of Object.keys(d.sens)) out.sens[k] = r1(clamp(x.sens?.[k] ?? 1, 0.3, 2.5));
     out.want = {};
@@ -118,7 +125,7 @@ export function beliefId(t) {
 /** Новое состояние: всё спокойно, характер — в точке темперамента. */
 export function fresh(temper) {
     const t = normTemper(temper);
-    return { fast: zero(), mood: zero(), base: { ...t.base }, will: 85, strain: 10, mask: 0, at: null, brk: null, hang: null, bel: {}, hist: [], marks: [], log: [] };
+    return { fast: zero(), mood: zero(), base: { ...t.base }, will: 85, strain: 10, mask: 0, jeal: 0, role: 0, at: null, brk: null, hang: null, dom: null, bel: {}, hist: [], marks: [], log: [] };
 }
 
 /** Починить состояние после загрузки (старый формат, пустые поля). */
@@ -132,6 +139,9 @@ export function heal(s, temper) {
     s.will = clamp(s.will ?? f.will, 0, 100);
     s.strain = clamp(s.strain ?? f.strain, 0, 100);
     s.mask = clamp(s.mask ?? 0, 0, 100);
+    s.jeal = clamp(s.jeal ?? 0, 0, 100);
+    s.role = Math.round(clamp(s.role ?? 0, 0, 99));
+    if (s.dom && typeof s.dom !== 'object') s.dom = null;
     if (!s.bel || typeof s.bel !== 'object' || Array.isArray(s.bel)) s.bel = {};
     if (!Array.isArray(s.hist)) s.hist = [];
     if (!Array.isArray(s.marks)) s.marks = [];
@@ -179,6 +189,7 @@ export function decay(s, hours, temper, load = {}) {
         const km2 = Math.LN2 / MASK_HL;
         const meq = Math.max(0, num(load.maskIn)) / km2;
         s.mask = clamp(meq + (s.mask - meq) * Math.exp(-km2 * h), 0, 100);
+        s.jeal = clamp(num(s.jeal) * Math.pow(0.5, h / JEAL_HL), 0, 100);
         // воля: возвращается сама; под напряжением — хуже
         const press = s.strain > 50 ? 1 - (s.strain - 50) / 100 : 1;
         s.will += WILL_REGEN * t.grit * num(load.willMul, 1) * press * h;
@@ -225,14 +236,16 @@ export function hit(s, hits, temper, opts = {}) {
         if (!u) continue;
         const neg = NEGATIVE.includes(k);
         const own = k === 'held' ? 1 : clamp(t.react * num(t.sens[k], 1), 0.4, MUL_CAP);
-        const m = u * own * (neg ? raw : 1) * num(opts.mul, 1);
+        // линза привязанности (opts.kmul) — третий множитель; все вместе не выше потолка: одно событие не сносит человека
+        const m = u * Math.min(TOTAL_CAP, own * (neg ? raw : 1) * clamp(opts.kmul?.[k] ?? 1, 0.2, 1.6)) * num(opts.mul, 1);
+        const settle = clamp(opts.kmood?.[k] ?? 1, 0.2, 1.5);     // сколько осядет в настроении: любовь размывает плохое — оно не задерживается
         for (const a of AXES) {
             const x = H[a] * m;
             if (!x) continue;
             s.fast[a] = clamp(s.fast[a] + x, -150, 150);
             // инерция: пока настроение тяжёлое, хорошее греет минуту, а оседает вполсилы — «простил» не бывает мгновенным
             const heavy = x > 0 && s.mood[a] < -8 ? 0.5 : 1;
-            s.mood[a] = clamp(s.mood[a] + x * MOOD_SHARE * heavy, -120, 120);
+            s.mood[a] = clamp(s.mood[a] + x * MOOD_SHARE * heavy * settle, -120, 120);
             d[a] += x;
         }
         d.strain += H.strain * m;
@@ -263,6 +276,7 @@ export const STEPS_AT = [25, 42, 58, 86];
 /** Сколько ступеней у каждой кассеты. */
 export const EMO_STEPS = { fear: 4, anger: 4, shame: 4, low: 3, tender: 3, playful: 2 };
 
+const FAMILY_NEG = ['fear', 'anger', 'shame', 'low'];
 const c01 = (v) => Math.max(0, Math.min(1, v));
 const gate = (x) => Math.min(1, x / 0.1);
 
@@ -295,17 +309,51 @@ export function stepOf(id, lvl) {
     return Math.min(st, EMO_STEPS[id] || 4);
 }
 
-/** Ведущая эмоция: { id, lvl, step, second } — id пуст, если всё ровно. */
-export function dominant(E, base = null) {
+/**
+ * Ведущая эмоция: { id, lvl, step, second } — id пуст, если всё ровно.
+ * prev — что вело до этого (доминанта Ухтомского): раз возникнув, чувство держится и не уступает первому же
+ * сопернику — другое перехватывает, только обогнав его на DOM_MARGIN. held: true — удержалось по инерции.
+ */
+export function dominant(E, base = null, prev = '') {
     const sc = scales(E, base);
     const order = EMOS.map(id => [id, sc[id]]).sort((x, y) => y[1] - x[1]);
-    const [id, lvl] = order[0];
+    let [id, lvl] = order[0];
+    let held = false;
+    if (prev && prev !== id && sc[prev] >= STEPS_AT[0] && lvl - sc[prev] < DOM_MARGIN) { id = prev; lvl = sc[prev]; held = true; }
     if (lvl < STEPS_AT[0]) return { id: '', lvl, step: 0, second: '', all: sc };
-    const sec = order[1] && order[1][1] >= STEPS_AT[1] ? order[1][0] : '';
-    return { id, lvl, step: stepOf(id, lvl), second: sec, all: sc };
+    const other = order.find(x => x[0] !== id);
+    const sec = other && other[1] >= STEPS_AT[1] ? other[0] : '';
+    return { id, lvl, step: stepOf(id, lvl), second: sec, all: sc, held };
 }
 
-/** Насколько воли хватает: 3 — с запасом, 2 — нормально, 1 — мало, 0 — на нуле. */
+/** Запомнить, что ведёт и с какого момента: { id, ts, mes }. Смена чувства — отсчёт заново. */
+export function setDominant(s, dom, now = {}) {
+    if (!dom?.id) { s.dom = null; return null; }
+    if (!s.dom || s.dom.id !== dom.id) s.dom = { id: dom.id, ts: now.ts ?? null, mes: num(now.mes) };
+    return s.dom;
+}
+
+/** Залип: тяжёлое чувство держит его уже hours часов истории на второй ступени и выше — мысли ходят по кругу. */
+export function stuck(s, dom, nowTs, hours = 6) {
+    if (!dom?.id || dom.step < 2 || !FAMILY_NEG.includes(dom.id) || !s.dom || s.dom.id !== dom.id) return false;
+    return s.dom.ts != null && nowTs != null && nowTs - s.dom.ts >= hours * 3.6e6;
+}
+
+// куда «своё» чувство тянет оси — чтобы постороннее плохое лило воду на ту же мельницу
+const DOM_PULL = { fear: { aro: 0.6, ctl: -0.8 }, anger: { val: -0.7, aro: 0.6 }, shame: { wor: -1 }, low: { val: -0.8, aro: -0.4 } };
+
+/**
+ * Доминанта стягивает постороннее: пока тяжёлое чувство ведёт (вторая ступень и выше), любое другое плохое
+ * событие частью уходит в него же. mag — сила события (самый большой сдвиг оси). Возвращает, сколько подлил.
+ */
+export function feedDominant(s, domId, mag, share = 0.2) {
+    const P = DOM_PULL[domId];
+    const x = Math.abs(num(mag)) * share;
+    if (!P || x < 1) return 0;
+    for (const [a, c] of Object.entries(P)) s.fast[a] = clamp(s.fast[a] + c * x, -150, 150);
+    return Math.round(x);
+}
+
 export const willBand = (will) => (will >= 70 ? 3 : will >= 40 ? 2 : will >= 20 ? 1 : 0);
 
 // ───────────── срыв ─────────────
@@ -331,6 +379,7 @@ export function resolveBreak(s, now = {}, hours = 10) {
     s.fast.aro = Math.min(s.fast.aro, 0);
     s.hang = { until: now.ts != null ? now.ts + hours * 3.6e6 : null, mes: num(now.mes), n: 0 };
     s.brk = null;
+    s.role = 0; s.heldDay = null;      // сорвался — роль сильного больше не держит
     return s;
 }
 
@@ -533,4 +582,77 @@ export function pickRecall(s, dom, lastI, gap = 20, cool = 25) {
     const pool = s.marks.filter(x => FAMILY[x.emo] === fam && lastI - x.mes >= gap && (x.r == null || lastI - x.r >= cool));
     if (!pool.length) return null;
     return pool.sort((a, b) => (b.emo === dom.id) - (a.emo === dom.id) || b.w - a.w || b.mes - a.mes)[0];
+}
+
+// эхо: всплывшее воспоминание возвращает часть того, чем оно было (только вспышкой — само проходит)
+const ECHO = { fear: { aro: 7, ctl: -6 }, anger: { val: -5, aro: 6 }, shame: { wor: -7, val: -2 }, low: { val: -7, aro: -3 }, tender: { val: 7, wor: 3 }, playful: { val: 4, aro: 4 } };
+export function echo(s, emo, w = 2) {
+    const e = ECHO[emo];
+    if (!e) return null;
+    const k = clamp(w, 1, 3) / 3;
+    const d = {};
+    for (const [a, x] of Object.entries(e)) { s.fast[a] = clamp(s.fast[a] + x * k, -150, 150); d[a] = Math.round(x * k); }
+    return d;
+}
+
+// ───────────── ревность ─────────────
+
+/** Ревность сейчас (0…100) растёт от события «соперник»: n — сила 1…3, mul — насколько оно его берёт (линза привязанности). */
+export function jealUp(s, n, mul = 1) {
+    const x = STEP[Math.round(clamp(n, 0, 3))] * clamp(mul, 0.2, 1.6) * 1.5;
+    s.jeal = clamp(num(s.jeal) + x, 0, 100);
+    return Math.round(x);
+}
+/** Как ревнует: 'open' — в открытую, 'quiet' — молча, считая соперника лучше, 'cling' — тревожно. Пусто — не ревнует. */
+export function jealStyle(s, E, dom) {
+    if (num(s.jeal) < 25) return '';
+    if (dom?.id === 'anger' || (E.ctl >= 10 && E.wor > -25)) return 'open';
+    if (dom?.id === 'shame' || E.wor <= -25) return 'quiet';
+    return 'cling';
+}
+
+// ───────────── роль сильного ─────────────
+
+/**
+ * Сколько дней подряд он держит лицо. Считается на смене дня: вчера сдерживался или носит в себе много —
+ * день в зачёт; открылся или сорвался — счёт с нуля; пара спокойных дней — тоже.
+ */
+export function roleDay(s, prevDay) {
+    const held = !!prevDay && s.heldDay === prevDay;
+    if (held || s.mask >= 50) s.role = Math.min(99, num(s.role) + 1);
+    else if (s.mask < 30) s.role = Math.max(0, num(s.role) - 2);
+    return s.role;
+}
+export function roleHit(s, hits, day) {
+    if ((hits?.held || 0) >= 1 && day) s.heldDay = day;
+    if ((hits?.open || 0) >= 2) { s.role = 0; s.heldDay = null; }
+    return s.role;
+}
+/** С какого дня роль начинает трещать: у кого воли больше — держит дольше. */
+export const roleEdge = (temper) => Math.round(4 * clamp(temper?.grit ?? 1, 0.4, 2) + 1);
+/** 0 — держит, 1 — устал держать, 2 — трещит. */
+export function roleBand(s, temper) {
+    const e = roleEdge(temper), r = num(s.role);
+    return r >= e + 3 ? 2 : r >= e ? 1 : 0;
+}
+
+// ───────────── юмор ─────────────
+
+/**
+ * Каким юмором он сейчас шутит (если шутит): 'aff' — тёплый, на двоих; 'self' — ирония, чтобы держаться;
+ * 'aggr' — с зубами; 'def' — над собой, раньше чем успеют другие. Пусто — не до шуток.
+ * Когда и какой — решает состояние; как сказать — уже дело того, кто пишет.
+ */
+export function witOf(s, E, dom, temper) {
+    const w = clamp(temper?.wit ?? 1, 0, 2);
+    if (w < 0.4 || s.brk || s.hang) return '';
+    const id = dom?.id || '', step = dom?.step || 0;
+    if (id === 'fear') return step === 1 && w >= 0.8 ? 'self' : '';
+    if (id === 'anger') return step <= 2 ? 'aggr' : '';
+    if (id === 'shame') return step <= 2 && w >= 0.8 ? 'def' : '';
+    if (id === 'low') return step === 1 && w >= 1 ? (E.wor <= -20 ? 'def' : 'self') : '';
+    if (id === 'playful') return 'aff';
+    if (id === 'tender') return w >= 1.2 ? 'aff' : '';
+    if (s.strain >= 45) return rawNerves(s) && E.val < 0 ? 'aggr' : 'self';
+    return E.val >= 8 && w >= 1 ? 'aff' : '';
 }

@@ -7,7 +7,7 @@ const world = { timestamp: { story_date: '2024-12-01', story_time: '10:00' }, sc
 const chat = [];
 const post = (name, user = false) => { chat.push({ name, is_user: user, is_system: false, mes: '…', horae_meta: { timestamp: { ...world.timestamp } } }); return chat.length - 1; };
 const handlers = {};
-const st = { ext: { brain: { auto: false } }, md: {}, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [], faces: [] };
+const st = { ext: { brain: { auto: false } }, md: {}, toasts: [], inner: {}, hurt: {}, sleep: {}, stones: null, trig: {}, shelf: {}, asked: 0, fx: {}, kept: {}, wants: {}, steps: 0, core: [], faces: [], rel: {} };
 
 const api = {
     ctx: () => ({ name1: 'Хеди Барлоу', extensionSettings: st.ext, chatMetadata: st.md, saveSettingsDebounced() {}, saveMetadataDebounced() {}, eventSource: { on() {} }, eventTypes: { CHAT_CHANGED: 'chat' } }),
@@ -21,7 +21,7 @@ const api = {
     worldState: () => world,
     parseDate: (s) => { const m = String(s || '').match(/(\d{4})-(\d{2})-(\d{2})/); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; },
     chatArr: () => chat,
-    relOf: () => ({ closeness: 90 }),
+    relOf: (a, b) => st.rel[`${first(a)}>${first(b)}`] || { closeness: 90 },
     toast: (...a) => st.toasts.push(a),
     updatePrompt() {}, render() {}, saveMeta() {},
     sec: (t, s = '') => `<div class="lf-sec">${t}${s}</div>`,
@@ -50,6 +50,7 @@ const api = {
         fx: (who) => st.fx[first(who)] || [],
         steps: () => ({ n: st.steps, themes: [] }),
         face: (i, who, k) => { st.faces.push([i, first(who), k]); return true; },
+        rel: (a, b) => st.rel[`${first(a)}>${first(b)}`] || { closeness: 90 },
     },
     lore: { about: async () => 'Лор о нём.', card: () => 'Карточка.', core: () => '• говорит коротко', key: (w) => String(w).trim(), coreAdd: (who, line) => { st.core.push([who, line]); return true; } },
     shelf: { tracker: (t) => { st.shelf.tracker = t; return true; }, mind: (f) => { st.shelf.mind = f; }, recs: (f) => { st.shelf.recs = f; }, open() {} },
@@ -583,4 +584,154 @@ test('0.4: темперамент — насколько нужна каждая
     change({ bin: 't', k: 'want.quiet', who: B }, '1.6');
     assert.equal(st.ext.brain.prof[B].want.quiet, 1.6);
     assert.match(st.shelf.tracker.html(), /Чего сколько надо/);
+});
+
+// ───── 0.5: линза привязанности, ревность, гавань, роль сильного, погода дома, механизмы ─────
+
+const LOVE = { trust: 90, closeness: 100, love: 100, desire: 80, jealousy: 10, tension: 10, guilt: 5, pin: { love: 100, closeness: 100 } };
+const N = 'Наташа Романофф';
+const lastLog = (src = 'post') => live().log.slice().reverse().find(e => e.src === src);
+
+test('0.5: Летописцу — «от кого» и ревность', () => {
+    const c = mod.chron();
+    assert.match(c.rule, /"by":"его имя"/);
+    assert.match(c.rule, /rival — ревность/);
+});
+
+test('0.5: любовь — линза: то же слово от неё размывается, от другого — нет; уход от неё больнее', async () => {
+    st.rel['баки>хеди'] = { ...LOVE };
+    await fresh(3200);
+    next([{ who: 'Баки', by: 'Хеди', blow: 2, why: 'она бросила резкое слово' }]);
+    const soft = lastLog();
+    assert.equal(soft.by, 'Хеди');
+    assert.ok(soft.tags.includes('blur'));
+    const html = st.shelf.tracker.html();
+    assert.match(html, /от Хеди · любовь размыла/);
+    await fresh(3300);
+    next([{ who: 'Баки', by: 'Наташа', blow: 2, why: 'Наташа бросила резкое слово' }]);
+    const plain = lastLog();
+    assert.ok(Math.abs(soft.d.wor) < Math.abs(plain.d.wor) * 0.8, `${soft.d.wor} против ${plain.d.wor}`);
+    await fresh(3400);
+    next([{ who: 'Баки', by: 'Хеди', loss: 2, why: 'она сказала, что уезжает одна' }]);
+    const deep = lastLog();
+    assert.ok(deep.tags.includes('deep'));
+    await fresh(3500);
+    next([{ who: 'Баки', loss: 2, why: 'сорвалась поездка' }]);
+    assert.ok(Math.abs(deep.d.val) > Math.abs(lastLog().d.val) * 1.1);
+});
+
+test('0.5: «К кому как» — умные статы пары в листе и у соседей', async () => {
+    st.rel['баки>хеди'] = { ...LOVE };
+    await fresh(3600);
+    const html = st.shelf.tracker.html();
+    assert.match(html, /К кому как/);
+    assert.match(html, /любовь · под замком/);
+    assert.match(html, /Прощает/); assert.match(html, /Ревность наготове/);
+    const d = brain.view(B).dear;
+    assert.equal(d.to, 'Хеди Барлоу'); assert.equal(d.L, 1);
+    assert.ok(d.blur >= 80 && d.haven >= 70);
+});
+
+test('0.5: ревность — берёт по любви и неуверенности, уходит модели поведением, игроку — подсказкой', async () => {
+    st.rel['баки>хеди'] = { ...LOVE };
+    await fresh(3700);
+    next([{ who: 'Баки', blow: 3, why: 'увидел своё досье' }]);
+    next([{ who: 'Баки', by: 'Хеди', rival: 3, why: 'она весь вечер смеялась с другим' }]);
+    assert.ok(live().jeal >= 40, `ревность ${live().jeal}`);
+    assert.equal(live().jealTo, 'Хеди Барлоу');
+    assert.ok(brain.view(B).combo.includes('jealous'));
+    assert.match(mod.prompt('normal'), /ревнует/);
+    const html = st.shelf.tracker.html();
+    assert.match(html, /ревность \(Хеди\)/);
+    assert.match(html, /ревнует: само за час не пройдёт/);
+    // без привязанности соперник почти не берёт
+    st.rel['баки>хеди'] = { trust: 50, closeness: 50 };
+    await fresh(3800);
+    next([{ who: 'Баки', by: 'Хеди', rival: 3, why: 'она смеялась с другим' }]);
+    assert.ok(live().jeal < 25, `без любви: ${live().jeal}`);
+    st.rel['баки>хеди'] = { ...LOVE };
+});
+
+test('0.5: гавань — рядом со своим человеком угроза переносится легче и отпускает быстрее', async () => {
+    st.rel['баки>хеди'] = { ...LOVE };
+    await fresh(3900);
+    world.scene.characters_present = ['Баки Барнс', 'Хеди Барлоу'];
+    next();
+    assert.match(st.shelf.tracker.html(), /рядом Хеди — отпускает/);
+    next([{ who: 'Баки', threat: 2, why: 'выстрел за окном' }]);
+    const near = lastLog();
+    assert.ok(near.tags.includes('haven'));
+    await fresh(4000);
+    world.scene.characters_present = ['Баки Барнс'];
+    next();
+    next([{ who: 'Баки', threat: 2, why: 'выстрел за окном' }]);
+    assert.ok(Math.abs(near.d.aro) < Math.abs(lastLog().d.aro), `${near.d.aro} против ${lastLog().d.aro}`);
+    world.scene.characters_present = ['Баки Барнс', 'Хеди Барлоу'];
+});
+
+test('0.5: от своего прилетело — неуверенный закрывается; тепло от того же человека отпускает', async () => {
+    st.rel['баки>хеди'] = { ...LOVE };
+    await fresh(4100);
+    next([{ who: 'Баки', blow: 3, why: 'увидел запись своих убийств' }]);
+    next([{ who: 'Баки', blow: 2, why: 'ещё одна' }]);
+    next([{ who: 'Баки', by: 'Хеди', wrong: 2, why: 'она решила за него' }]);
+    assert.equal(live().hurtBy.kind, 'guard');
+    assert.ok(brain.view(B).combo.includes('shut'));
+    assert.match(mod.prompt('normal'), /закрывается и отступает раньше, чем оттолкнут/);
+    assert.match(st.shelf.tracker.html(), /шаг за тобой/);
+    next([{ who: 'Баки', by: 'Хеди', warm: 2, why: 'она взяла его за руку' }]);
+    assert.equal(live().hurtBy, null);
+    assert.ok(live().feed['Хеди Барлоу'].bond > 0, 'кто чем кормит');
+});
+
+test('0.5: роль сильного — дни подряд, потом трещит', async () => {
+    st.rel['баки>хеди'] = { ...LOVE };
+    await fresh(4300);
+    for (let d = 1; d <= 12; d++) { hour(4300 + d * 24); next([{ who: 'Баки', held: 1, why: 'сказал, что всё нормально' }]); }
+    assert.ok(live().role >= 10, `дней: ${live().role}`);
+    assert.equal(brain.view(B).role, live().role);
+    assert.ok(brain.view(B).combo.includes('crack'));
+    const html = st.shelf.tracker.html();
+    assert.match(html, /держит лицо \d+-й день подряд — трещит/);
+    assert.match(html, /дай возможность не держаться/);
+    assert.match(mod.prompt('normal'), /слишком долго держит лицо/);
+    next([{ who: 'Баки', by: 'Хеди', open: 3, why: 'наконец рассказал ей' }]);
+    assert.equal(live().role, 0);
+});
+
+test('0.5: погода дома — свои на нервах, и ему тяжелее', async () => {
+    st.rel['баки>хеди'] = { ...LOVE };
+    world.scene.characters_present = ['Баки Барнс', 'Наташа Романофф'];
+    await fresh(4600);
+    st.md.brain.who[N].strain = 85;
+    assert.match(st.shelf.tracker.html(), /дома тяжело: Наташа на нервах/);
+    const calm = live().strain;
+    hour(4612); next();
+    assert.ok(live().strain > calm, 'за полдня рядом с этим у него тоже накопилось');
+    st.md.brain.who[N].strain = 10;
+    world.scene.characters_present = ['Баки Барнс', 'Хеди Барлоу'];
+});
+
+test('0.5: юмор — каким шутит, решает состояние', async () => {
+    st.rel['баки>хеди'] = { ...LOVE };
+    await fresh(4700);
+    next([{ who: 'Баки', fun: 3, warm: 2, why: 'она его рассмешила' }]);
+    assert.equal(brain.view(B).wit, 'aff');
+    assert.match(mod.prompt('normal'), /если шутит — тепло и на двоих/);
+});
+
+test('0.5: механизмы выключаются по одному', async () => {
+    st.rel['баки>хеди'] = { ...LOVE };
+    assert.match(st.shelf.tracker.html(), /Механизмы/);
+    change({ bin: 'm', k: 'lens' }, '', { checked: false });
+    assert.equal(st.ext.brain.mech.lens, false);
+    await fresh(4800);
+    next([{ who: 'Баки', by: 'Хеди', blow: 2, why: 'резкое слово' }]);
+    assert.deepEqual(lastLog().tags, [], 'без линзы — как от любого');
+    assert.equal(brain.view(B).dear, null);
+    change({ bin: 'm', k: 'lens' }, '', { checked: true });
+    change({ bin: 'm', k: 'wit' }, '', { checked: false });
+    assert.equal(brain.view(B).wit, '');
+    change({ bin: 'm', k: 'wit' }, '', { checked: true });
+    delete st.rel['баки>хеди'];
 });

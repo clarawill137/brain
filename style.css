@@ -145,3 +145,19 @@
 .brn-mark:last-child { border-bottom: 0; }
 .brn-mark b { display: block; font-size: 13.5px; font-weight: 500; line-height: 1.35; color: var(--lf-text, #ede4df); }
 .brn-mark small { display: block; font-size: 12px; color: var(--lf-dim, #a3958f); }
+
+/* 0.5 — «К кому как», метки линзы, механизмы */
+.brn-bonds { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 4px; }
+.brn-bond { padding: 12px 14px; border-radius: 16px; border: 1px solid var(--lf-line2); background: var(--lf-card); }
+.brn-bond-h { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.brn-bond-h b { font: 600 15px var(--lf-sans); color: var(--lf-text); }
+.brn-bond-h small { margin-left: auto; font-size: 12px; color: var(--lf-rose2); white-space: nowrap; }
+.brn-bond-s { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+.brn-bond-s span { display: grid; grid-template-columns: 1fr 24px; align-items: center; gap: 3px 6px; min-width: 0; }
+.brn-bond-s em { grid-column: 1 / -1; font: normal 12px var(--lf-sans); color: var(--lf-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brn-bond-s i { height: 5px; border-radius: 3px; background: var(--lf-line2); overflow: hidden; }
+.brn-bond-s u { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #a98bd9, #d98aa8); text-decoration: none; }
+.brn-bond-s small { font: 11px var(--lf-sans); color: var(--lf-dim); text-align: right; }
+.brn-bond .lf-hint { margin: 8px 0 0; }
+.brn-log small.tag { color: var(--lf-rose2); }
+.brn-mech { display: block; flex-basis: 100%; margin-left: 0; font-size: 12px; color: var(--lf-dim); }

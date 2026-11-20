@@ -2,7 +2,7 @@
 // что сработает, что добьёт и чего ждать. Собирается из того же состояния, что и заметка модели.
 // Чистая функция: без Таверны, Life и DOM. Тексты без рода — подходят любому персонажу.
 
-import { willBand, beliefHp, rawNerves, nightChance } from './psyche.js';
+import { willBand, beliefHp, rawNerves, nightChance, roleBand } from './psyche.js';
 import { hungriest } from './drives.js';
 
 const BY_EMO = {
@@ -22,8 +22,10 @@ const BY_DRIVE = {
 const SORE = { warm: '', threat: 'угроза', blow: 'удары по самооценке', bound: 'потеря контроля', wrong: 'несправедливость и ложь', loss: 'разлука и отвержение' };
 
 /**
- * v: { s, t, dom, leak, fore: { breakIn, rawIn, calmIn }, apart } → { help: [], hurt: [], expect: [] }
- * apart — он сейчас не рядом с героиней игрока.
+ * v: { s, t, dom, leak, fore: { breakIn, rawIn, calmIn }, apart, dear, mine, feeder, hurt } → { help: [], hurt: [], expect: [] }
+ * apart — он сейчас не рядом с героиней игрока. dear — { name, st } его «свой человек» и умные статы пары;
+ * dear.sour — насколько между ними накопилось (0…1); mine — этот человек и есть героиня игрока; feeder — { name, drive } кто обычно утоляет самую голодную потребность;
+ * hurt — что он делает после того, как от своего прилетело ('mend' | 'guard').
  */
 export function hints(v) {
     const { s, t, dom } = v;
@@ -33,16 +35,31 @@ export function hints(v) {
 
     if (s.brk) expect.push('срыв в следующем ответе — словами его не остановить, нужны время и безопасность');
     if (neg && BY_EMO[dom.id]) help.push(BY_EMO[dom.id]);
+    // привязанность: через что он видит своего человека. Сначала острое — что между ними прямо сейчас
+    const d = v.dear, st = d?.st;
+    const jealous = s.jeal >= 25;
+    const quiet = !jealous && !v.hurt;
+    if (v.hurt === 'guard') help.push(v.mine ? 'после твоих слов — в глухой обороне и навстречу не пойдёт: шаг за тобой' : 'после слов своего человека — в глухой обороне: навстречу не пойдёт');
+    if (v.hurt === 'mend') expect.push('сердиться долго не выйдет: скоро будет искать повод помириться');
+    if (jealous) help.push(v.mine ? 'ревнует: само за час не пройдёт — скажи или покажи прямо, чьё это место' : 'ревнует: само за час не пройдёт');
     if (neg && t.fix?.length) help.push(`возвращает в себя: ${t.fix.slice(0, 4).join(', ')}`);
     if (v.leak >= 1) help.push('носит в себе несказанное: спроси прямо — сейчас может ответить');
     const hungry = hungriest(s);
     if (hungry && hungry.band <= 2 && hungry.v < 45) help.push(BY_DRIVE[hungry.id]);
     if (band <= 1) help.push('сил мало: не требуй решений и разговоров «о главном» прямо сейчас');
+    const rb = roleBand(s, t);
+    if (rb) help.push(`держит лицо ${s.role}-й день подряд: дай возможность не держаться — спроси и не отступай после первого «нормально»`);
+    if (v.feeder && hungry && hungry.id === v.feeder.drive) help.push(`это обычно даёт ${v.feeder.name}`);
+    if (st && quiet && st.blur >= 55) help.push(v.mine ? 'мелкую резкость тебе простит почти не заметив — любовь её размывает; уход и холод — нет' : `мелкую резкость от ${d.name} простит почти не заметив; уход и холод — нет`);
+    if (st && quiet && v.haven) help.push(v.mine ? 'рядом с тобой отпускает само: можно просто побыть рядом' : `рядом ${d.name} — отпускает само`);
     const shaky = (t.beliefs || []).map(b => [b, beliefHp(s, b.id)]).filter(([, hp]) => hp > 0 && hp <= 40).sort((a, b) => a[1] - b[1])[0];
     if (shaky) help.push(`убеждение «${shaky[0].t}» шатается: ещё несколько поступков — и рухнет`);
 
     const sore = Object.entries(t.sens || {}).filter(([k, x]) => x >= 1.2 && SORE[k]).sort((a, b) => b[1] - a[1]).map(([k]) => SORE[k]);
     if (sore.length) hurt.push(`больные места: ${sore.slice(0, 3).join(', ')}`);
+    if (st && st.fuse >= 55 && s.jeal < 25) hurt.push(v.mine ? 'ревность наготове: твоё тепло к другому у него на глазах попадёт в больное' : 'ревность наготове: чужое внимание к своему человеку попадёт в больное');
+    if (st && st.dread >= 55) hurt.push(v.mine ? 'боится тебя потерять: любое «мне надо побыть без тебя» услышит как отказ' : 'боится потерять своего человека: любое отдаление читает как отказ');
+    if (d && d.sour >= 0.5) hurt.push('между вами накопилось: сейчас и нейтральное слово прочтёт как укол');
     if (rawNerves(s)) hurt.push('нервы сырые: любое плохое бьёт сильнее, триггеры — на ступень выше');
     if (s.hang) hurt.push('после срыва: ещё один удар — и сорвётся снова');
     if (neg && s.mood[{ fear: 'ctl', anger: 'val', shame: 'wor', low: 'val' }[dom.id]] <= -16) hurt.push('настроение тяжёлое: от одной хорошей фразы не отпустит — тепло нужно несколько раз подряд');
@@ -54,5 +71,5 @@ export function hints(v) {
     if (f.calmIn != null && !s.brk) expect.push(`если не подливать — отпустит через ${hrs(f.calmIn)} истории`);
     if (nightChance(s, { trig: false }) >= 0.4) expect.push('ночь, скорее всего, будет плохой');
     if (v.apart && s.dr && s.dr.bond <= 35 && band >= 1) expect.push('скучает: скоро выйдет на связь первым');
-    return { help, hurt, expect };
+    return { help: help.slice(0, 6), hurt: hurt.slice(0, 5), expect };
 }
